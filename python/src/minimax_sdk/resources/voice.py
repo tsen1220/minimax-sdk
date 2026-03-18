@@ -45,7 +45,7 @@ def _build_clone_body(
     receives an explicit value.
     """
     body: dict[str, Any] = {
-        "file_id": file_id,
+        "file_id": int(file_id),
         "voice_id": voice_id,
         "need_noise_reduction": need_noise_reduction,
         "need_volume_normalization": need_volume_normalization,

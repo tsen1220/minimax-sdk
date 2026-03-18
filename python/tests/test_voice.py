@@ -42,7 +42,7 @@ class TestVoiceClone:
             "input_sensitive": {"is_sensitive": False},
         })
 
-        result = voice.clone(file_id="file_123", voice_id="my_voice")
+        result = voice.clone(file_id="123456", voice_id="my_voice")
 
         assert isinstance(result, VoiceCloneResult)
         assert result.voice_id == "my_voice"
@@ -54,7 +54,7 @@ class TestVoiceClone:
         call_kwargs = mock_http.request.call_args
         assert call_kwargs[0] == ("POST", "/v1/voice_clone")
         body = call_kwargs[1]["json"]
-        assert body["file_id"] == "file_123"
+        assert body["file_id"] == 123456
         assert body["voice_id"] == "my_voice"
 
     def test_clone_with_demo_audio_decodes_hex(self):
@@ -74,7 +74,7 @@ class TestVoiceClone:
         })
 
         result = voice.clone(
-            file_id="file_123",
+            file_id="123456",
             voice_id="my_voice",
             text="Hello world",
             model="speech-2.8-hd",
@@ -194,7 +194,7 @@ class TestVoiceCloneAllOptions:
         })
 
         result = voice.clone(
-            file_id="file_123",
+            file_id="123456",
             voice_id="my_voice",
             clone_prompt={"prompt_audio": "file_456", "prompt_text": "Hello"},
             text="Hello world",
@@ -302,7 +302,7 @@ class TestAsyncVoiceClone:
             "input_sensitive": {"is_sensitive": False},
         })
 
-        result = await voice.clone(file_id="file_123", voice_id="my_voice")
+        result = await voice.clone(file_id="123456", voice_id="my_voice")
 
         assert isinstance(result, VoiceCloneResult)
         assert result.voice_id == "my_voice"
@@ -326,7 +326,7 @@ class TestAsyncVoiceClone:
         })
 
         result = await voice.clone(
-            file_id="file_123",
+            file_id="123456",
             voice_id="my_voice",
             clone_prompt={"prompt_audio": "f1", "prompt_text": "Hi"},
             text="Hello world",
