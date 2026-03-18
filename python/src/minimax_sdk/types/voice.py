@@ -17,7 +17,7 @@ class VoiceCloneResult(BaseModel):
 
     voice_id: str
     demo_audio: Optional[AudioResponse] = None
-    input_sensitive: Optional[dict[str, Any]] = None
+    input_sensitive: Any = None
 
 
 class VoiceDesignResult(BaseModel):

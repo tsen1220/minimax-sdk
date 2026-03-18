@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any, BinaryIO, Union
 
-from .._audio import AudioResponse, build_audio_response
+from .._audio import AudioResponse, build_audio_response, decode_hex_audio
 from .._base import AsyncResource, SyncResource
 from ..types.files import FileInfo
 from ..types.voice import (
@@ -71,8 +71,19 @@ def _parse_clone_result(resp: dict[str, Any], voice_id: str) -> VoiceCloneResult
     demo_audio: AudioResponse | None = None
     raw_demo = resp.get("demo_audio")
     if raw_demo:
-        # demo_audio is a nested dict with hex audio data
-        demo_audio = build_audio_response(raw_demo)
+        if isinstance(raw_demo, str):
+            # API returns demo_audio as a hex-encoded string
+            audio_bytes = decode_hex_audio(raw_demo)
+            demo_audio = AudioResponse(
+                data=audio_bytes,
+                duration=0,
+                sample_rate=0,
+                format="mp3",
+                size=len(audio_bytes),
+            )
+        else:
+            # Nested dict structure (fallback)
+            demo_audio = build_audio_response(raw_demo)
 
     return VoiceCloneResult(
         voice_id=voice_id,
@@ -84,10 +95,24 @@ def _parse_clone_result(resp: dict[str, Any], voice_id: str) -> VoiceCloneResult
 def _parse_design_result(resp: dict[str, Any]) -> VoiceDesignResult:
     """Parse the raw API response into a :class:`VoiceDesignResult`.
 
-    The ``trial_audio`` hex payload is decoded into an :class:`AudioResponse`.
+    The ``trial_audio`` is returned as a hex-encoded string by the API.
     """
-    raw_trial = resp.get("trial_audio", {})
-    trial_audio = build_audio_response(raw_trial)
+    raw_trial = resp.get("trial_audio", "")
+    trial_audio: AudioResponse | None = None
+    if raw_trial:
+        if isinstance(raw_trial, str):
+            # API returns trial_audio as a hex-encoded string
+            audio_bytes = decode_hex_audio(raw_trial)
+            trial_audio = AudioResponse(
+                data=audio_bytes,
+                duration=0,
+                sample_rate=0,
+                format="mp3",
+                size=len(audio_bytes),
+            )
+        else:
+            # Nested dict structure (fallback)
+            trial_audio = build_audio_response(raw_trial)
 
     return VoiceDesignResult(
         voice_id=resp["voice_id"],
