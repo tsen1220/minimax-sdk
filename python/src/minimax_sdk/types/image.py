@@ -14,21 +14,6 @@ class ImageSubjectReference(BaseModel):
     image_file: str  # Public URL or base64 data URL
 
 
-class ImageGenerationRequest(BaseModel):
-    """Request body for image generation (POST /v1/image_generation)."""
-
-    model: str
-    prompt: str
-    aspect_ratio: Optional[str] = None
-    width: Optional[int] = None
-    height: Optional[int] = None
-    response_format: Optional[str] = None
-    seed: Optional[int] = None
-    n: Optional[int] = None
-    prompt_optimizer: Optional[bool] = None
-    subject_reference: Optional[list[ImageSubjectReference]] = None
-
-
 class ImageResult(BaseModel):
     """Result of an image generation request."""
 

@@ -7,28 +7,6 @@ from typing import Optional
 from pydantic import BaseModel
 
 
-class SubjectReference(BaseModel):
-    """Subject reference for subject-driven video generation."""
-
-    type: str
-    image: str
-
-
-class VideoGenerationRequest(BaseModel):
-    """Request body for video generation (POST /v1/video_generation)."""
-
-    model: str
-    prompt: Optional[str] = None
-    prompt_optimizer: Optional[bool] = None
-    fast_pretreatment: Optional[bool] = None
-    duration: Optional[int] = None
-    resolution: Optional[str] = None
-    callback_url: Optional[str] = None
-    first_frame_image: Optional[str] = None
-    last_frame_image: Optional[str] = None
-    subject_reference: Optional[list[SubjectReference]] = None
-
-
 class VideoCreateResult(BaseModel):
     """Result of creating a video generation task."""
 

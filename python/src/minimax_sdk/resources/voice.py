@@ -18,6 +18,11 @@ from ..types.voice import (
     VoiceList,
 )
 
+# Rebuild models that reference AudioResponse via TYPE_CHECKING guard,
+# so Pydantic can resolve the forward reference at runtime.
+VoiceCloneResult.model_rebuild()
+VoiceDesignResult.model_rebuild()
+
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 

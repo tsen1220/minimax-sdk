@@ -89,14 +89,14 @@ def poll_task(
             # Unknown status — treat as still pending but log-worthy.
             pass
 
-        if time.monotonic() + poll_interval > deadline:
+        time.sleep(poll_interval)
+
+        if time.monotonic() > deadline:
             raise PollTimeoutError(
                 f"Task {task_id} did not complete within {poll_timeout}s",
                 code=0,
                 trace_id="",
             )
-
-        time.sleep(poll_interval)
 
 
 async def async_poll_task(
@@ -158,11 +158,11 @@ async def async_poll_task(
         if status not in _PENDING_STATUSES:
             pass
 
-        if asyncio.get_running_loop().time() + poll_interval > deadline:
+        await asyncio.sleep(poll_interval)
+
+        if asyncio.get_running_loop().time() > deadline:
             raise PollTimeoutError(
                 f"Task {task_id} did not complete within {poll_timeout}s",
                 code=0,
                 trace_id="",
             )
-
-        await asyncio.sleep(poll_interval)

@@ -119,12 +119,12 @@ class TestPollTaskTimeout:
         """Simulate time passing so poll_timeout is exceeded."""
         # monotonic() is called:
         #   1) once at the start to compute deadline = start + poll_timeout
-        #   2) after each query to check if (monotonic() + poll_interval) > deadline
+        #   2) after sleep to check if monotonic() > deadline
         #
         # With poll_timeout=10 and poll_interval=5:
         #   deadline = 0 + 10 = 10
-        #   After 1st query: monotonic() returns 6, 6 + 5 = 11 > 10 => timeout
-        mock_monotonic.side_effect = [0.0, 6.0]
+        #   After 1st query + sleep: monotonic() returns 11 > 10 => timeout
+        mock_monotonic.side_effect = [0.0, 11.0]
 
         processing_body = {
             "status": "Processing",
@@ -324,11 +324,11 @@ class TestAsyncPollTaskTimeout:
             [processing_body, processing_body, processing_body]
         )
 
-        # Mock get_event_loop().time():
+        # Mock get_running_loop().time():
         #   1) deadline = 0 + 10 = 10
-        #   2) check: 6 + 5 = 11 > 10 => timeout
+        #   2) after sleep: 11 > 10 => timeout
         mock_loop = MagicMock()
-        mock_loop.time.side_effect = [0.0, 6.0]
+        mock_loop.time.side_effect = [0.0, 11.0]
 
         with patch("minimax_sdk._polling.asyncio.get_running_loop", return_value=mock_loop):
             with pytest.raises(PollTimeoutError) as exc_info:

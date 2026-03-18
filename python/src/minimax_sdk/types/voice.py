@@ -2,52 +2,31 @@
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
-
-class ClonePrompt(BaseModel):
-    """Prompt audio reference for voice cloning."""
-
-    prompt_audio: str
-    prompt_text: str
-
-
-class VoiceCloneRequest(BaseModel):
-    """Request body for voice cloning (POST /v1/voice_clone)."""
-
-    file_id: str
-    voice_id: str
-    clone_prompt: Optional[ClonePrompt] = None
-    text: Optional[str] = None
-    model: Optional[str] = None
-    language_boost: Optional[str] = None
-    need_noise_reduction: Optional[bool] = None
-    need_volume_normalization: Optional[bool] = None
+if TYPE_CHECKING:
+    from .._audio import AudioResponse
 
 
 class VoiceCloneResult(BaseModel):
     """Result of a voice clone operation."""
 
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     voice_id: str
-    demo_audio: Optional[Any] = None  # AudioResponse when available
+    demo_audio: Optional[AudioResponse] = None
     input_sensitive: Optional[dict[str, Any]] = None
-
-
-class VoiceDesignRequest(BaseModel):
-    """Request body for voice design (POST /v1/voice_design)."""
-
-    prompt: str
-    preview_text: str
-    voice_id: Optional[str] = None
 
 
 class VoiceDesignResult(BaseModel):
     """Result of a voice design operation."""
 
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     voice_id: str
-    trial_audio: Any = None  # AudioResponse when available
+    trial_audio: AudioResponse | None = None
 
 
 class VoiceInfo(BaseModel):
