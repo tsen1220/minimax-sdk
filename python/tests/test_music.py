@@ -253,7 +253,6 @@ class TestMusicGenerateStream:
         mock_client = MagicMock()
         music = Music(mock_http, client=mock_client)
 
-        # Build SSE lines
         chunk1_hex = "48454c4c4f"  # b"HELLO"
         chunk2_hex = "574f524c44"  # b"WORLD"
         sse_lines = [
@@ -262,15 +261,7 @@ class TestMusicGenerateStream:
             "data: [DONE]",
         ]
 
-        # Mock the httpx stream context manager
-        mock_response = MagicMock()
-        mock_response.iter_lines.return_value = iter(sse_lines)
-
-        @contextmanager
-        def mock_stream(*args, **kwargs):
-            yield mock_response
-
-        mock_http._client.stream = mock_stream
+        mock_http.stream_request.return_value = iter(sse_lines)
 
         chunks = list(music.generate_stream(
             model="music-2.5+",
@@ -296,14 +287,7 @@ class TestMusicGenerateStream:
             "data: [DONE]",
         ]
 
-        mock_response = MagicMock()
-        mock_response.iter_lines.return_value = iter(sse_lines)
-
-        @contextmanager
-        def mock_stream(*args, **kwargs):
-            yield mock_response
-
-        mock_http._client.stream = mock_stream
+        mock_http.stream_request.return_value = iter(sse_lines)
 
         chunks = list(music.generate_stream(model="music-2.5+"))
 
@@ -457,36 +441,11 @@ class TestAsyncMusicGenerateStream:
             "data: [DONE]",
         ]
 
-        # Create an async iterator for aiter_lines
-        class AsyncLineIterator:
-            def __init__(self, lines):
-                self._lines = iter(lines)
+        async def mock_stream_request(*args, **kwargs):
+            for line in sse_lines:
+                yield line
 
-            def __aiter__(self):
-                return self
-
-            async def __anext__(self):
-                try:
-                    return next(self._lines)
-                except StopIteration:
-                    raise StopAsyncIteration
-
-        mock_response = MagicMock()
-        mock_response.aiter_lines.return_value = AsyncLineIterator(sse_lines)
-
-        # Mock async context manager for stream
-        class AsyncStreamCM:
-            def __init__(self, response):
-                self._response = response
-
-            async def __aenter__(self):
-                return self._response
-
-            async def __aexit__(self, *args):
-                pass
-
-        mock_http._client = MagicMock()
-        mock_http._client.stream.return_value = AsyncStreamCM(mock_response)
+        mock_http.stream_request = mock_stream_request
 
         chunks = []
         async for chunk in music.generate_stream(
