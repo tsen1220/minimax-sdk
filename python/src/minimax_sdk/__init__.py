@@ -4,7 +4,7 @@ Usage::
 
     from minimax_sdk import MiniMax
 
-    client = MiniMax()  # reads MINIMAX_API_KEY from .env or environment
+    client = MiniMax()  # reads MINIMAX_API_KEY from environment variable
     audio = client.speech.tts(text="Hello world", model="speech-2.8-hd", ...)
 """
 
