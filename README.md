@@ -1,6 +1,6 @@
 # MiniMax SDK
 
-Official SDKs for MiniMax's multimodal APIs.
+Unofficial SDKs for MiniMax's multimodal APIs.
 
 ## Supported APIs
 
