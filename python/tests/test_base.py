@@ -1,10 +1,10 @@
-"""Tests for minimax_sdk._base — SyncResource, AsyncResource, _decode_audio."""
+"""Tests for minimax_sdk._base — SyncResource, AsyncResource."""
 
 from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from minimax_sdk._base import AsyncResource, SyncResource, _decode_audio
+from minimax_sdk._base import AsyncResource, SyncResource
 from minimax_sdk._http import AsyncHttpClient, HttpClient
 
 
@@ -44,18 +44,3 @@ class TestAsyncResource:
 
         assert resource._http is mock_http
         assert resource._client is None
-
-
-class TestDecodeAudio:
-    def test_decodes_hex_string(self) -> None:
-        hex_str = "48656c6c6f"  # "Hello" in hex
-        result = _decode_audio(hex_str)
-        assert result == b"Hello"
-
-    def test_empty_string(self) -> None:
-        assert _decode_audio("") == b""
-
-    def test_binary_data_roundtrip(self) -> None:
-        original = b"\x00\x01\x02\xff"
-        hex_str = original.hex()
-        assert _decode_audio(hex_str) == original

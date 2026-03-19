@@ -18,15 +18,14 @@ def _ok_resp(payload: dict) -> dict:
 
 
 def _make_music_resource() -> tuple[Music, MagicMock]:
-    """Create a Music resource with mocked _client.
+    """Create a Music resource with mocked _http.
 
-    Music.generate() and Music.generate_lyrics() call self._client.request(),
-    where _client is the MiniMax top-level client passed to SyncResource.__init__.
+    Music.generate() and Music.generate_lyrics() call self._http.request().
     """
     mock_http = MagicMock()
     mock_client = MagicMock()
     music = Music(mock_http, client=mock_client)
-    return music, mock_client
+    return music, mock_http
 
 
 # Some sample hex-encoded audio (b"music" -> hex "6d75736963")
@@ -254,7 +253,6 @@ class TestMusicGenerateStream:
         mock_client = MagicMock()
         music = Music(mock_http, client=mock_client)
 
-        # Build SSE lines
         chunk1_hex = "48454c4c4f"  # b"HELLO"
         chunk2_hex = "574f524c44"  # b"WORLD"
         sse_lines = [
@@ -263,15 +261,7 @@ class TestMusicGenerateStream:
             "data: [DONE]",
         ]
 
-        # Mock the httpx stream context manager
-        mock_response = MagicMock()
-        mock_response.iter_lines.return_value = iter(sse_lines)
-
-        @contextmanager
-        def mock_stream(*args, **kwargs):
-            yield mock_response
-
-        mock_client._client.stream = mock_stream
+        mock_http.stream_request.return_value = iter(sse_lines)
 
         chunks = list(music.generate_stream(
             model="music-2.5+",
@@ -297,14 +287,7 @@ class TestMusicGenerateStream:
             "data: [DONE]",
         ]
 
-        mock_response = MagicMock()
-        mock_response.iter_lines.return_value = iter(sse_lines)
-
-        @contextmanager
-        def mock_stream(*args, **kwargs):
-            yield mock_response
-
-        mock_client._client.stream = mock_stream
+        mock_http.stream_request.return_value = iter(sse_lines)
 
         chunks = list(music.generate_stream(model="music-2.5+"))
 
@@ -348,11 +331,11 @@ from minimax_sdk.resources.music import AsyncMusic
 
 
 def _make_async_music_resource() -> tuple[AsyncMusic, MagicMock]:
-    """Create an AsyncMusic resource with mocked _client."""
+    """Create an AsyncMusic resource with mocked _http."""
     mock_http = AsyncMock()
     mock_client = AsyncMock()
     music = AsyncMusic(mock_http, client=mock_client)
-    return music, mock_client
+    return music, mock_http
 
 
 class TestAsyncMusicGenerate:
@@ -458,36 +441,11 @@ class TestAsyncMusicGenerateStream:
             "data: [DONE]",
         ]
 
-        # Create an async iterator for aiter_lines
-        class AsyncLineIterator:
-            def __init__(self, lines):
-                self._lines = iter(lines)
+        async def mock_stream_request(*args, **kwargs):
+            for line in sse_lines:
+                yield line
 
-            def __aiter__(self):
-                return self
-
-            async def __anext__(self):
-                try:
-                    return next(self._lines)
-                except StopIteration:
-                    raise StopAsyncIteration
-
-        mock_response = MagicMock()
-        mock_response.aiter_lines.return_value = AsyncLineIterator(sse_lines)
-
-        # Mock async context manager for stream
-        class AsyncStreamCM:
-            def __init__(self, response):
-                self._response = response
-
-            async def __aenter__(self):
-                return self._response
-
-            async def __aexit__(self, *args):
-                pass
-
-        mock_client._client = MagicMock()
-        mock_client._client.stream.return_value = AsyncStreamCM(mock_response)
+        mock_http.stream_request = mock_stream_request
 
         chunks = []
         async for chunk in music.generate_stream(

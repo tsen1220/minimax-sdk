@@ -123,7 +123,7 @@ class TestRetryAfterSeconds:
 class TestHttpClientConstructor:
     def test_sets_attributes(self) -> None:
         client = HttpClient(api_key="sk-key", base_url="https://example.com/", max_retries=5)
-        assert client.api_key == "sk-key"
+        assert client._api_key == "sk-key"
         assert client.base_url == "https://example.com"  # trailing slash stripped
         assert client.max_retries == 5
         client.close()
@@ -438,7 +438,7 @@ class TestHttpClientContextManager:
     def test_with_statement(self) -> None:
         with HttpClient(api_key="sk-key") as client:
             assert isinstance(client, HttpClient)
-            assert client.api_key == "sk-key"
+            assert client._api_key == "sk-key"
 
 
 # ── AsyncHttpClient constructor ──────────────────────────────────────────────
@@ -447,7 +447,7 @@ class TestHttpClientContextManager:
 class TestAsyncHttpClientConstructor:
     def test_sets_attributes(self) -> None:
         client = AsyncHttpClient(api_key="sk-async", base_url="https://async.io/", max_retries=3)
-        assert client.api_key == "sk-async"
+        assert client._api_key == "sk-async"
         assert client.base_url == "https://async.io"
         assert client.max_retries == 3
 
@@ -721,7 +721,7 @@ class TestAsyncHttpClientContextManager:
     async def test_async_with_statement(self) -> None:
         async with AsyncHttpClient(api_key="sk-key") as client:
             assert isinstance(client, AsyncHttpClient)
-            assert client.api_key == "sk-key"
+            assert client._api_key == "sk-key"
 
 
 # ── Edge cases: unreachable fallback paths ────────────────────────────────────
@@ -852,3 +852,189 @@ class TestAsyncHttpClientFallbackPaths:
             with pytest.raises(MiniMaxError, match="Request failed after"):
                 await client.request("GET", "/v1/test")
         await client.close()
+
+
+# ── Sync request_bytes tests ─────────────────────────────────────────────────
+
+
+class TestRequestBytes:
+    """Tests for HttpClient.request_bytes()."""
+
+    def test_returns_binary_content(self):
+        """request_bytes returns raw bytes for non-JSON response."""
+        client = HttpClient(api_key="test-key")
+        mock_response = MagicMock()
+        mock_response.content = b"\xff\xfb\x90\x04" * 100
+        mock_response.headers = {"content-type": "audio/mpeg"}
+        mock_response.raise_for_status = MagicMock()
+        client._client = MagicMock()
+        client._client.request.return_value = mock_response
+
+        result = client.request_bytes("GET", "/v1/files/retrieve_content")
+        assert result == b"\xff\xfb\x90\x04" * 100
+
+    def test_raises_on_json_error(self):
+        """request_bytes raises MiniMaxError when response is JSON with error."""
+        client = HttpClient(api_key="test-key")
+        mock_response = MagicMock()
+        mock_response.headers = {"content-type": "application/json"}
+        mock_response.json.return_value = {
+            "base_resp": {"status_code": 2013, "status_msg": "invalid param"},
+        }
+        mock_response.raise_for_status = MagicMock()
+        client._client = MagicMock()
+        client._client.request.return_value = mock_response
+
+        from minimax_sdk.exceptions import InvalidParameterError
+
+        with pytest.raises(InvalidParameterError):
+            client.request_bytes("GET", "/v1/files/retrieve_content")
+
+
+# ── Sync stream_request tests ────────────────────────────────────────────────
+
+
+class TestStreamRequest:
+    """Tests for HttpClient.stream_request()."""
+
+    def test_yields_lines(self):
+        """stream_request yields response lines."""
+        client = HttpClient(api_key="test-key")
+        mock_response = MagicMock()
+        mock_response.headers = {"content-type": "text/event-stream"}
+        mock_response.raise_for_status = MagicMock()
+        mock_response.iter_lines.return_value = iter(["line1", "line2", "line3"])
+
+        from contextlib import contextmanager
+
+        @contextmanager
+        def mock_stream(*args, **kwargs):
+            yield mock_response
+
+        client._client = MagicMock()
+        client._client.stream = mock_stream
+
+        lines = list(client.stream_request("POST", "/v1/t2a_v2"))
+        assert lines == ["line1", "line2", "line3"]
+
+    def test_raises_on_json_error(self):
+        """stream_request raises MiniMaxError when response is JSON error."""
+        client = HttpClient(api_key="test-key")
+        mock_response = MagicMock()
+        mock_response.headers = {"content-type": "application/json"}
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = {
+            "base_resp": {"status_code": 1002, "status_msg": "rate limit"},
+        }
+
+        from contextlib import contextmanager
+
+        @contextmanager
+        def mock_stream(*args, **kwargs):
+            yield mock_response
+
+        client._client = MagicMock()
+        client._client.stream = mock_stream
+
+        with pytest.raises(RateLimitError):
+            list(client.stream_request("POST", "/v1/t2a_v2"))
+
+
+# ── Async request_bytes tests ────────────────────────────────────────────────
+
+
+class TestAsyncRequestBytes:
+    """Tests for AsyncHttpClient.request_bytes()."""
+
+    @pytest.mark.asyncio
+    async def test_returns_binary_content(self):
+        """async request_bytes returns raw bytes."""
+        client = AsyncHttpClient(api_key="test-key")
+        mock_response = MagicMock()
+        mock_response.content = b"audio data"
+        mock_response.headers = {"content-type": "audio/mpeg"}
+        mock_response.raise_for_status = MagicMock()
+        client._client = AsyncMock()
+        client._client.request.return_value = mock_response
+
+        result = await client.request_bytes("GET", "/v1/files/retrieve_content")
+        assert result == b"audio data"
+
+    @pytest.mark.asyncio
+    async def test_raises_on_json_error(self):
+        """async request_bytes raises on JSON error response."""
+        client = AsyncHttpClient(api_key="test-key")
+        mock_response = MagicMock()
+        mock_response.headers = {"content-type": "application/json"}
+        mock_response.json.return_value = {
+            "base_resp": {"status_code": 1004, "status_msg": "auth failed"},
+        }
+        mock_response.raise_for_status = MagicMock()
+        client._client = AsyncMock()
+        client._client.request.return_value = mock_response
+
+        with pytest.raises(AuthError):
+            await client.request_bytes("GET", "/v1/files/retrieve_content")
+
+
+# ── Async stream_request tests ───────────────────────────────────────────────
+
+
+class TestAsyncStreamRequest:
+    """Tests for AsyncHttpClient.stream_request()."""
+
+    @pytest.mark.asyncio
+    async def test_yields_lines(self):
+        """async stream_request yields response lines."""
+        client = AsyncHttpClient(api_key="test-key")
+        mock_response = MagicMock()
+        mock_response.headers = {"content-type": "text/event-stream"}
+        mock_response.raise_for_status = MagicMock()
+
+        async def mock_aiter_lines():
+            for line in ["line1", "line2"]:
+                yield line
+
+        mock_response.aiter_lines = mock_aiter_lines
+
+        class AsyncStreamCM:
+            async def __aenter__(self):
+                return mock_response
+
+            async def __aexit__(self, *args):
+                pass
+
+        client._client = MagicMock()
+        client._client.stream.return_value = AsyncStreamCM()
+
+        lines = []
+        async for line in client.stream_request("POST", "/v1/t2a_v2"):
+            lines.append(line)
+        assert lines == ["line1", "line2"]
+
+    @pytest.mark.asyncio
+    async def test_raises_on_json_error(self):
+        """async stream_request raises on JSON error response."""
+        client = AsyncHttpClient(api_key="test-key")
+        mock_response = MagicMock()
+        mock_response.headers = {"content-type": "application/json"}
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = {
+            "base_resp": {"status_code": 1008, "status_msg": "insufficient balance"},
+        }
+
+        class AsyncStreamCM:
+            async def __aenter__(self):
+                return mock_response
+
+            async def __aexit__(self, *args):
+                pass
+
+        client._client = MagicMock()
+        client._client.stream.return_value = AsyncStreamCM()
+
+        from minimax_sdk.exceptions import InsufficientBalanceError
+
+        with pytest.raises(InsufficientBalanceError):
+            async for _ in client.stream_request("POST", "/v1/t2a_v2"):
+                pass

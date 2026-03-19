@@ -48,26 +48,26 @@ _SAMPLE_BYTES = bytes.fromhex(_SAMPLE_HEX)
 def _make_speech_resource() -> tuple[Speech, MagicMock]:
     """Create a Speech resource with a mocked HttpClient."""
     mock_http = MagicMock()
-    mock_http.api_key = "test-key"
+    mock_http._api_key = "test-key"
     mock_http.base_url = "https://api.minimax.io"
     mock_client = MagicMock()
+    mock_client.poll_interval = 5.0
+    mock_client.poll_timeout = 600.0
+    mock_client.files = MagicMock()
     speech = Speech(mock_http, client=mock_client)
-    speech._poll_interval = 5.0
-    speech._poll_timeout = 600.0
-    speech._files = MagicMock()
     return speech, mock_http
 
 
 def _make_async_speech_resource() -> tuple[AsyncSpeech, AsyncMock]:
     """Create an AsyncSpeech resource with a mocked AsyncHttpClient."""
     mock_http = AsyncMock()
-    mock_http.api_key = "test-key"
+    mock_http._api_key = "test-key"
     mock_http.base_url = "https://api.minimax.io"
     mock_client = AsyncMock()
+    mock_client.poll_interval = 5.0
+    mock_client.poll_timeout = 600.0
+    mock_client.files = AsyncMock()
     speech = AsyncSpeech(mock_http, client=mock_client)
-    speech._poll_interval = 5.0
-    speech._poll_timeout = 600.0
-    speech._files = AsyncMock()
     return speech, mock_http
 
 
@@ -146,12 +146,14 @@ _WS_CHUNK_FINAL = {
     "base_resp": {"status_code": 0},
 }
 
-_WS_TASK_COMPLETE = {
-    "event": "task_complete",
+_WS_FINAL_CHUNK = {
+    "event": "task_continued",
+    "data": {"audio": ""},
+    "is_final": True,
     "extra_info": {
-        "audio_length": 500,
-        "audio_sample_rate": 24000,
-        "audio_size": len(_SAMPLE_BYTES),
+        "audio_length": 1000,
+        "audio_sample_rate": 32000,
+        "audio_size": 5,
         "audio_format": "mp3",
     },
     "base_resp": {"status_code": 0},
@@ -607,7 +609,7 @@ class TestSpeechAsyncGenerate:
         # Step 3: files.retrieve returns FileInfo
         mock_file_info = MagicMock()
         mock_file_info.download_url = "https://cdn.minimax.io/audio.mp3"
-        speech._files.retrieve.return_value = mock_file_info
+        speech._client.files.retrieve.return_value = mock_file_info
 
         result = speech.async_generate(
             text="Long text",
@@ -621,19 +623,19 @@ class TestSpeechAsyncGenerate:
         assert result.status == "Success"
         assert result.file_id == "file-789"
         assert result.download_url == "https://cdn.minimax.io/audio.mp3"
-        speech._files.retrieve.assert_called_once_with("file-789")
+        speech._client.files.retrieve.assert_called_once_with("file-789")
 
     @patch("minimax_sdk.resources.speech.poll_task")
     def test_async_generate_uses_default_poll_settings(self, mock_poll):
         speech, mock_http = _make_speech_resource()
-        speech._poll_interval = 10.0
-        speech._poll_timeout = 300.0
+        speech._client.poll_interval = 10.0
+        speech._client.poll_timeout = 300.0
 
         mock_http.request.return_value = _ok_resp({"task_id": "t1"})
         mock_poll.return_value = _ok_resp({"status": "Success", "file_id": "f1"})
         mock_file_info = MagicMock()
         mock_file_info.download_url = "https://example.com/a.mp3"
-        speech._files.retrieve.return_value = mock_file_info
+        speech._client.files.retrieve.return_value = mock_file_info
 
         speech.async_generate(text="hello", voice_setting={"voice_id": "v1"})
 
@@ -694,14 +696,15 @@ class TestSpeechConnection:
         return conn, ws
 
     def test_send_returns_audio_response(self):
-        conn, ws = self._make_connection([_WS_CHUNK_1, _WS_TASK_COMPLETE])
+        conn, ws = self._make_connection([_WS_CHUNK_1, _WS_FINAL_CHUNK])
 
         result = conn.send("Hello")
 
         assert isinstance(result, AudioResponse)
         assert result.data == _SAMPLE_BYTES
-        assert result.duration == 500.0
-        assert result.sample_rate == 24000
+        # extra_info from _WS_FINAL_CHUNK overwrites _WS_CHUNK_1's
+        assert result.duration == 1000.0
+        assert result.sample_rate == 32000
         assert result.format == "mp3"
 
         # Verify task_continue was sent
@@ -710,7 +713,7 @@ class TestSpeechConnection:
         assert sent_continue[0]["text"] == "Hello"
 
     def test_send_multiple_chunks(self):
-        conn, ws = self._make_connection([_WS_CHUNK_1, _WS_CHUNK_1, _WS_TASK_COMPLETE])
+        conn, ws = self._make_connection([_WS_CHUNK_1, _WS_CHUNK_1, _WS_FINAL_CHUNK])
 
         result = conn.send("Hello world")
 
@@ -753,14 +756,14 @@ class TestSpeechConnection:
             conn.send("Hello")
 
     def test_send_stream_yields_bytes(self):
-        conn, ws = self._make_connection([_WS_CHUNK_1, _WS_TASK_COMPLETE])
+        conn, ws = self._make_connection([_WS_CHUNK_1, _WS_FINAL_CHUNK])
 
         result = list(conn.send_stream("Hello"))
 
         assert result == [_SAMPLE_BYTES]
 
     def test_send_stream_multiple_chunks(self):
-        conn, ws = self._make_connection([_WS_CHUNK_1, _WS_CHUNK_1, _WS_TASK_COMPLETE])
+        conn, ws = self._make_connection([_WS_CHUNK_1, _WS_CHUNK_1, _WS_FINAL_CHUNK])
 
         result = list(conn.send_stream("Hello world"))
 
@@ -836,7 +839,7 @@ class TestSpeechConnection:
         assert conn._closed is True
 
     def test_context_manager(self):
-        all_messages = [_WS_TASK_STARTED, _WS_CHUNK_1, _WS_TASK_COMPLETE, _WS_TASK_FINISHED]
+        all_messages = [_WS_TASK_STARTED, _WS_CHUNK_1, _WS_FINAL_CHUNK, _WS_TASK_FINISHED]
         ws = MockWebSocket(all_messages)
 
         with SpeechConnection(ws, "test-key", "speech-2.8-hd", {"voice_id": "v1"}) as conn:
@@ -870,7 +873,7 @@ class TestSpeechConnection:
         # Override _messages with bytes
         ws._messages = [
             json.dumps(_WS_CHUNK_1).encode("utf-8"),
-            json.dumps(_WS_TASK_COMPLETE).encode("utf-8"),
+            json.dumps(_WS_FINAL_CHUNK).encode("utf-8"),
         ]
         conn._closed = False
 
@@ -883,7 +886,7 @@ class TestSpeechConnection:
         conn, ws = self._make_connection([])
         ws._messages = [
             json.dumps(_WS_CHUNK_1).encode("utf-8"),
-            json.dumps(_WS_TASK_COMPLETE).encode("utf-8"),
+            json.dumps(_WS_FINAL_CHUNK).encode("utf-8"),
         ]
         conn._closed = False
 
@@ -917,8 +920,10 @@ class TestSpeechConnection:
             },
             "base_resp": {"status_code": 0},
         }
-        complete_with_extra = {
-            "event": "task_complete",
+        final_with_extra = {
+            "event": "task_continued",
+            "data": {"audio": ""},
+            "is_final": True,
             "extra_info": {
                 "audio_length": 1000,
                 "audio_sample_rate": 48000,
@@ -927,10 +932,10 @@ class TestSpeechConnection:
             },
             "base_resp": {"status_code": 0},
         }
-        conn, ws = self._make_connection([chunk_no_extra, chunk_with_extra, complete_with_extra])
+        conn, ws = self._make_connection([chunk_no_extra, chunk_with_extra, final_with_extra])
 
         result = conn.send("Hello")
-        # task_complete extra_info should be used last
+        # Final chunk's extra_info should be used last
         assert result.format == "flac"
         assert result.sample_rate == 48000
 
@@ -941,7 +946,7 @@ class TestSpeechConnection:
             "data": {"audio": ""},
             "base_resp": {"status_code": 0},
         }
-        conn, ws = self._make_connection([empty_chunk, _WS_CHUNK_1, _WS_TASK_COMPLETE])
+        conn, ws = self._make_connection([empty_chunk, _WS_CHUNK_1, _WS_FINAL_CHUNK])
 
         result = list(conn.send_stream("Hello"))
         assert result == [_SAMPLE_BYTES]
@@ -1107,7 +1112,7 @@ class TestAsyncSpeechAsyncGenerate:
         # files.retrieve
         mock_file_info = MagicMock()
         mock_file_info.download_url = "https://cdn.minimax.io/audio.mp3"
-        speech._files.retrieve.return_value = mock_file_info
+        speech._client.files.retrieve.return_value = mock_file_info
 
         result = await speech.async_generate(
             text="Long text",
@@ -1125,14 +1130,14 @@ class TestAsyncSpeechAsyncGenerate:
     @patch("minimax_sdk.resources.speech.async_poll_task")
     async def test_async_generate_uses_default_poll_settings(self, mock_poll):
         speech, mock_http = _make_async_speech_resource()
-        speech._poll_interval = 10.0
-        speech._poll_timeout = 300.0
+        speech._client.poll_interval = 10.0
+        speech._client.poll_timeout = 300.0
 
         mock_http.request.return_value = _ok_resp({"task_id": "t1"})
         mock_poll.return_value = _ok_resp({"status": "Success", "file_id": "f1"})
         mock_file_info = MagicMock()
         mock_file_info.download_url = "https://example.com/a.mp3"
-        speech._files.retrieve.return_value = mock_file_info
+        speech._client.files.retrieve.return_value = mock_file_info
 
         await speech.async_generate(text="hello", voice_setting={"voice_id": "v1"})
 
@@ -1190,17 +1195,18 @@ class TestAsyncSpeechConnection:
 
     @pytest.mark.asyncio
     async def test_send_returns_audio_response(self):
-        conn, ws = await self._make_connection([_WS_CHUNK_1, _WS_TASK_COMPLETE])
+        conn, ws = await self._make_connection([_WS_CHUNK_1, _WS_FINAL_CHUNK])
 
         result = await conn.send("Hello")
 
         assert isinstance(result, AudioResponse)
         assert result.data == _SAMPLE_BYTES
-        assert result.duration == 500.0
+        # extra_info from _WS_FINAL_CHUNK overwrites _WS_CHUNK_1's
+        assert result.duration == 1000.0
 
     @pytest.mark.asyncio
     async def test_send_multiple_chunks(self):
-        conn, ws = await self._make_connection([_WS_CHUNK_1, _WS_CHUNK_1, _WS_TASK_COMPLETE])
+        conn, ws = await self._make_connection([_WS_CHUNK_1, _WS_CHUNK_1, _WS_FINAL_CHUNK])
 
         result = await conn.send("Hello world")
 
@@ -1246,7 +1252,7 @@ class TestAsyncSpeechConnection:
 
     @pytest.mark.asyncio
     async def test_send_stream_yields_bytes(self):
-        conn, ws = await self._make_connection([_WS_CHUNK_1, _WS_TASK_COMPLETE])
+        conn, ws = await self._make_connection([_WS_CHUNK_1, _WS_FINAL_CHUNK])
 
         result = [chunk async for chunk in conn.send_stream("Hello")]
 
@@ -1335,7 +1341,7 @@ class TestAsyncSpeechConnection:
 
     @pytest.mark.asyncio
     async def test_context_manager(self):
-        all_messages = [_WS_TASK_STARTED, _WS_CHUNK_1, _WS_TASK_COMPLETE, _WS_TASK_FINISHED]
+        all_messages = [_WS_TASK_STARTED, _WS_CHUNK_1, _WS_FINAL_CHUNK, _WS_TASK_FINISHED]
         ws = MockAsyncWebSocket(all_messages)
         conn = AsyncSpeechConnection(ws, "test-key", "speech-2.8-hd", {"voice_id": "v1"})
         await conn._start()
@@ -1368,7 +1374,7 @@ class TestAsyncSpeechConnection:
         conn, ws = await self._make_connection([])
         ws._messages = [
             json.dumps(_WS_CHUNK_1).encode("utf-8"),
-            json.dumps(_WS_TASK_COMPLETE).encode("utf-8"),
+            json.dumps(_WS_FINAL_CHUNK).encode("utf-8"),
         ]
         conn._closed = False
 
@@ -1380,7 +1386,7 @@ class TestAsyncSpeechConnection:
         conn, ws = await self._make_connection([])
         ws._messages = [
             json.dumps(_WS_CHUNK_1).encode("utf-8"),
-            json.dumps(_WS_TASK_COMPLETE).encode("utf-8"),
+            json.dumps(_WS_FINAL_CHUNK).encode("utf-8"),
         ]
         conn._closed = False
 
@@ -1403,8 +1409,10 @@ class TestAsyncSpeechConnection:
             "data": {"audio": _SAMPLE_HEX},
             "base_resp": {"status_code": 0},
         }
-        complete_with_extra = {
-            "event": "task_complete",
+        final_with_extra = {
+            "event": "task_continued",
+            "data": {"audio": ""},
+            "is_final": True,
             "extra_info": {
                 "audio_length": 1000,
                 "audio_sample_rate": 48000,
@@ -1413,7 +1421,7 @@ class TestAsyncSpeechConnection:
             },
             "base_resp": {"status_code": 0},
         }
-        conn, ws = await self._make_connection([chunk_no_extra, complete_with_extra])
+        conn, ws = await self._make_connection([chunk_no_extra, final_with_extra])
 
         result = await conn.send("Hello")
         assert result.format == "flac"
@@ -1425,7 +1433,7 @@ class TestAsyncSpeechConnection:
             "data": {"audio": ""},
             "base_resp": {"status_code": 0},
         }
-        conn, ws = await self._make_connection([empty_chunk, _WS_CHUNK_1, _WS_TASK_COMPLETE])
+        conn, ws = await self._make_connection([empty_chunk, _WS_CHUNK_1, _WS_FINAL_CHUNK])
 
         result = [chunk async for chunk in conn.send_stream("Hello")]
         assert result == [_SAMPLE_BYTES]
@@ -1447,7 +1455,7 @@ class TestAsyncSpeechConnection:
 
     @pytest.mark.asyncio
     async def test_send_stream_multiple_chunks(self):
-        conn, ws = await self._make_connection([_WS_CHUNK_1, _WS_CHUNK_1, _WS_TASK_COMPLETE])
+        conn, ws = await self._make_connection([_WS_CHUNK_1, _WS_CHUNK_1, _WS_FINAL_CHUNK])
 
         result = [chunk async for chunk in conn.send_stream("Hello")]
         assert result == [_SAMPLE_BYTES, _SAMPLE_BYTES]

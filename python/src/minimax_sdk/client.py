@@ -10,48 +10,17 @@ exposes resource namespaces (``speech``, ``voice``, ``video``, ``image``,
 from __future__ import annotations
 
 import os
-from typing import TypeVar
+from typing import NamedTuple, TypeVar
 
-import dotenv
 import httpx
 
 from minimax_sdk._http import AsyncHttpClient, HttpClient
 from minimax_sdk.resources.files import AsyncFiles, Files
-
-# ── Forward-compatible imports for resources that will be added later ─────────
-# Speech, Voice, Video, Image, and Music resources are not yet implemented.
-# The following try/except blocks allow the client to be instantiated once those
-# modules exist, while still providing clear type information.
-
-try:
-    from minimax_sdk.resources.speech import AsyncSpeech, Speech
-except ImportError:  # pragma: no cover
-    Speech = None  # type: ignore[assignment,misc]
-    AsyncSpeech = None  # type: ignore[assignment,misc]
-
-try:
-    from minimax_sdk.resources.voice import AsyncVoice, Voice
-except ImportError:  # pragma: no cover
-    Voice = None  # type: ignore[assignment,misc]
-    AsyncVoice = None  # type: ignore[assignment,misc]
-
-try:
-    from minimax_sdk.resources.video import AsyncVideo, Video
-except ImportError:  # pragma: no cover
-    Video = None  # type: ignore[assignment,misc]
-    AsyncVideo = None  # type: ignore[assignment,misc]
-
-try:
-    from minimax_sdk.resources.image import AsyncImage, Image
-except ImportError:  # pragma: no cover
-    Image = None  # type: ignore[assignment,misc]
-    AsyncImage = None  # type: ignore[assignment,misc]
-
-try:
-    from minimax_sdk.resources.music import AsyncMusic, Music
-except ImportError:  # pragma: no cover
-    Music = None  # type: ignore[assignment,misc]
-    AsyncMusic = None  # type: ignore[assignment,misc]
+from minimax_sdk.resources.image import AsyncImage, Image
+from minimax_sdk.resources.music import AsyncMusic, Music
+from minimax_sdk.resources.speech import AsyncSpeech, Speech
+from minimax_sdk.resources.video import AsyncVideo, Video
+from minimax_sdk.resources.voice import AsyncVoice, Voice
 
 # ── Configuration defaults ───────────────────────────────────────────────────
 
@@ -103,6 +72,64 @@ def _resolve_config(
     return default
 
 
+class _ResolvedConfig(NamedTuple):
+    """Holds all resolved configuration values for client construction."""
+
+    api_key: str
+    base_url: str
+    timeout: httpx.Timeout
+    max_retries: int
+    poll_interval: float
+    poll_timeout: float
+
+
+def _build_config(
+    *,
+    api_key: str | None,
+    base_url: str | None,
+    timeout_connect: float | None,
+    timeout_read: float | None,
+    timeout_write: float | None,
+    timeout_pool: float | None,
+    max_retries: int | None,
+    poll_interval: float | None,
+    poll_timeout: float | None,
+) -> _ResolvedConfig:
+    """Resolve all configuration values and build an httpx Timeout.
+
+    Both :class:`MiniMax` and :class:`AsyncMiniMax` delegate to this function
+    so that the resolution logic is defined exactly once.
+    """
+    resolved_api_key: str = _resolve_config(api_key, "MINIMAX_API_KEY", "", cast=str)
+    if not resolved_api_key:
+        raise ValueError(
+            "MiniMax API key is required. Provide it via the 'api_key' "
+            "parameter or set the MINIMAX_API_KEY environment variable."
+        )
+
+    resolved_base_url: str = _resolve_config(
+        base_url, "MINIMAX_BASE_URL", _DEFAULT_BASE_URL, cast=str
+    )
+    timeout = httpx.Timeout(
+        connect=timeout_connect if timeout_connect is not None else _DEFAULT_TIMEOUT_CONNECT,
+        read=timeout_read if timeout_read is not None else _DEFAULT_TIMEOUT_READ,
+        write=timeout_write if timeout_write is not None else _DEFAULT_TIMEOUT_WRITE,
+        pool=timeout_pool if timeout_pool is not None else _DEFAULT_TIMEOUT_POOL,
+    )
+    resolved_max_retries = max_retries if max_retries is not None else _DEFAULT_MAX_RETRIES
+    resolved_poll_interval = poll_interval if poll_interval is not None else _DEFAULT_POLL_INTERVAL
+    resolved_poll_timeout = poll_timeout if poll_timeout is not None else _DEFAULT_POLL_TIMEOUT
+
+    return _ResolvedConfig(
+        api_key=resolved_api_key,
+        base_url=resolved_base_url,
+        timeout=timeout,
+        max_retries=resolved_max_retries,
+        poll_interval=resolved_poll_interval,
+        poll_timeout=resolved_poll_timeout,
+    )
+
+
 # ── Sync client ──────────────────────────────────────────────────────────────
 
 
@@ -111,18 +138,19 @@ class MiniMax:
 
     Provides access to all MiniMax resources via attribute namespaces::
 
-        client = MiniMax()  # reads .env automatically
+        client = MiniMax(api_key="sk-xxx")
         audio = client.speech.tts(text="Hello", model="speech-2.8-hd", ...)
         result = client.video.text_to_video(prompt="A cat", model="...", ...)
 
-    Configuration is resolved with priority: parameter > env var > default.
+    Configuration is resolved with priority: parameter > default.
+    Only ``api_key`` and ``base_url`` support environment variables.
     """
 
-    speech: Speech  # type: ignore[valid-type]
-    voice: Voice  # type: ignore[valid-type]
-    video: Video  # type: ignore[valid-type]
-    image: Image  # type: ignore[valid-type]
-    music: Music  # type: ignore[valid-type]
+    speech: Speech
+    voice: Voice
+    video: Video
+    image: Image
+    music: Music
     files: Files
 
     def __init__(
@@ -137,72 +165,35 @@ class MiniMax:
         max_retries: int | None = None,
         poll_interval: float | None = None,
         poll_timeout: float | None = None,
-        load_dotenv: bool = True,
     ) -> None:
-        # Step 1: Load .env if requested
-        if load_dotenv:
-            dotenv.load_dotenv(dotenv.find_dotenv())
-
-        # Step 2: Resolve configuration
-        resolved_api_key: str = _resolve_config(api_key, "MINIMAX_API_KEY", "", cast=str)
-        if not resolved_api_key:
-            raise ValueError(
-                "MiniMax API key is required. Provide it via the 'api_key' "
-                "parameter or set the MINIMAX_API_KEY environment variable."
-            )
-
-        resolved_base_url: str = _resolve_config(
-            base_url, "MINIMAX_BASE_URL", _DEFAULT_BASE_URL, cast=str
-        )
-        resolved_timeout_connect: float = _resolve_config(
-            timeout_connect, "MINIMAX_TIMEOUT_CONNECT", _DEFAULT_TIMEOUT_CONNECT, cast=float
-        )
-        resolved_timeout_read: float = _resolve_config(
-            timeout_read, "MINIMAX_TIMEOUT_READ", _DEFAULT_TIMEOUT_READ, cast=float
-        )
-        resolved_timeout_write: float = _resolve_config(
-            timeout_write, "MINIMAX_TIMEOUT_WRITE", _DEFAULT_TIMEOUT_WRITE, cast=float
-        )
-        resolved_timeout_pool: float = _resolve_config(
-            timeout_pool, "MINIMAX_TIMEOUT_POOL", _DEFAULT_TIMEOUT_POOL, cast=float
-        )
-        resolved_max_retries: int = _resolve_config(
-            max_retries, "MINIMAX_MAX_RETRIES", _DEFAULT_MAX_RETRIES, cast=int
+        cfg = _build_config(
+            api_key=api_key,
+            base_url=base_url,
+            timeout_connect=timeout_connect,
+            timeout_read=timeout_read,
+            timeout_write=timeout_write,
+            timeout_pool=timeout_pool,
+            max_retries=max_retries,
+            poll_interval=poll_interval,
+            poll_timeout=poll_timeout,
         )
 
-        self.poll_interval: float = _resolve_config(
-            poll_interval, "MINIMAX_POLL_INTERVAL", _DEFAULT_POLL_INTERVAL, cast=float
-        )
-        self.poll_timeout: float = _resolve_config(
-            poll_timeout, "MINIMAX_POLL_TIMEOUT", _DEFAULT_POLL_TIMEOUT, cast=float
-        )
-
-        # Step 3: Create the HTTP transport
-        timeout = httpx.Timeout(
-            connect=resolved_timeout_connect,
-            read=resolved_timeout_read,
-            write=resolved_timeout_write,
-            pool=resolved_timeout_pool,
-        )
+        self.poll_interval = cfg.poll_interval
+        self.poll_timeout = cfg.poll_timeout
 
         self._http_client = HttpClient(
-            api_key=resolved_api_key,
-            base_url=resolved_base_url,
-            timeout=timeout,
-            max_retries=resolved_max_retries,
+            api_key=cfg.api_key,
+            base_url=cfg.base_url,
+            timeout=cfg.timeout,
+            max_retries=cfg.max_retries,
         )
 
-        # Step 4: Mount resource namespaces
-        if Speech is not None:
-            self.speech = Speech(self._http_client, self)
-        if Voice is not None:
-            self.voice = Voice(self._http_client, self)
-        if Video is not None:
-            self.video = Video(self._http_client, self)
-        if Image is not None:
-            self.image = Image(self._http_client, self)
-        if Music is not None:
-            self.music = Music(self._http_client, self)
+        # Mount resource namespaces
+        self.speech = Speech(self._http_client, self)
+        self.voice = Voice(self._http_client, self)
+        self.video = Video(self._http_client, self)
+        self.image = Image(self._http_client, self)
+        self.music = Music(self._http_client, self)
         self.files = Files(self._http_client, self)
 
     def close(self) -> None:
@@ -231,18 +222,19 @@ class AsyncMiniMax:
 
     Provides access to all MiniMax resources via attribute namespaces::
 
-        client = AsyncMiniMax()
+        client = AsyncMiniMax(api_key="sk-xxx")
         audio = await client.speech.tts(text="Hello", model="speech-2.8-hd", ...)
         result = await client.video.text_to_video(prompt="A cat", model="...", ...)
 
-    Configuration is resolved with priority: parameter > env var > default.
+    Configuration is resolved with priority: parameter > default.
+    Only ``api_key`` and ``base_url`` support environment variables.
     """
 
-    speech: AsyncSpeech  # type: ignore[valid-type]
-    voice: AsyncVoice  # type: ignore[valid-type]
-    video: AsyncVideo  # type: ignore[valid-type]
-    image: AsyncImage  # type: ignore[valid-type]
-    music: AsyncMusic  # type: ignore[valid-type]
+    speech: AsyncSpeech
+    voice: AsyncVoice
+    video: AsyncVideo
+    image: AsyncImage
+    music: AsyncMusic
     files: AsyncFiles
 
     def __init__(
@@ -257,72 +249,35 @@ class AsyncMiniMax:
         max_retries: int | None = None,
         poll_interval: float | None = None,
         poll_timeout: float | None = None,
-        load_dotenv: bool = True,
     ) -> None:
-        # Step 1: Load .env if requested
-        if load_dotenv:
-            dotenv.load_dotenv(dotenv.find_dotenv())
-
-        # Step 2: Resolve configuration
-        resolved_api_key: str = _resolve_config(api_key, "MINIMAX_API_KEY", "", cast=str)
-        if not resolved_api_key:
-            raise ValueError(
-                "MiniMax API key is required. Provide it via the 'api_key' "
-                "parameter or set the MINIMAX_API_KEY environment variable."
-            )
-
-        resolved_base_url: str = _resolve_config(
-            base_url, "MINIMAX_BASE_URL", _DEFAULT_BASE_URL, cast=str
-        )
-        resolved_timeout_connect: float = _resolve_config(
-            timeout_connect, "MINIMAX_TIMEOUT_CONNECT", _DEFAULT_TIMEOUT_CONNECT, cast=float
-        )
-        resolved_timeout_read: float = _resolve_config(
-            timeout_read, "MINIMAX_TIMEOUT_READ", _DEFAULT_TIMEOUT_READ, cast=float
-        )
-        resolved_timeout_write: float = _resolve_config(
-            timeout_write, "MINIMAX_TIMEOUT_WRITE", _DEFAULT_TIMEOUT_WRITE, cast=float
-        )
-        resolved_timeout_pool: float = _resolve_config(
-            timeout_pool, "MINIMAX_TIMEOUT_POOL", _DEFAULT_TIMEOUT_POOL, cast=float
-        )
-        resolved_max_retries: int = _resolve_config(
-            max_retries, "MINIMAX_MAX_RETRIES", _DEFAULT_MAX_RETRIES, cast=int
+        cfg = _build_config(
+            api_key=api_key,
+            base_url=base_url,
+            timeout_connect=timeout_connect,
+            timeout_read=timeout_read,
+            timeout_write=timeout_write,
+            timeout_pool=timeout_pool,
+            max_retries=max_retries,
+            poll_interval=poll_interval,
+            poll_timeout=poll_timeout,
         )
 
-        self.poll_interval: float = _resolve_config(
-            poll_interval, "MINIMAX_POLL_INTERVAL", _DEFAULT_POLL_INTERVAL, cast=float
-        )
-        self.poll_timeout: float = _resolve_config(
-            poll_timeout, "MINIMAX_POLL_TIMEOUT", _DEFAULT_POLL_TIMEOUT, cast=float
-        )
-
-        # Step 3: Create the HTTP transport
-        timeout = httpx.Timeout(
-            connect=resolved_timeout_connect,
-            read=resolved_timeout_read,
-            write=resolved_timeout_write,
-            pool=resolved_timeout_pool,
-        )
+        self.poll_interval = cfg.poll_interval
+        self.poll_timeout = cfg.poll_timeout
 
         self._http_client = AsyncHttpClient(
-            api_key=resolved_api_key,
-            base_url=resolved_base_url,
-            timeout=timeout,
-            max_retries=resolved_max_retries,
+            api_key=cfg.api_key,
+            base_url=cfg.base_url,
+            timeout=cfg.timeout,
+            max_retries=cfg.max_retries,
         )
 
-        # Step 4: Mount resource namespaces
-        if AsyncSpeech is not None:
-            self.speech = AsyncSpeech(self._http_client, self)
-        if AsyncVoice is not None:
-            self.voice = AsyncVoice(self._http_client, self)
-        if AsyncVideo is not None:
-            self.video = AsyncVideo(self._http_client, self)
-        if AsyncImage is not None:
-            self.image = AsyncImage(self._http_client, self)
-        if AsyncMusic is not None:
-            self.music = AsyncMusic(self._http_client, self)
+        # Mount resource namespaces
+        self.speech = AsyncSpeech(self._http_client, self)
+        self.voice = AsyncVoice(self._http_client, self)
+        self.video = AsyncVideo(self._http_client, self)
+        self.image = AsyncImage(self._http_client, self)
+        self.music = AsyncMusic(self._http_client, self)
         self.files = AsyncFiles(self._http_client, self)
 
     async def close(self) -> None:

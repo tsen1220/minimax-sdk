@@ -181,7 +181,7 @@ class Music(SyncResource):
             audio_setting=audio_setting,
         )
 
-        resp = self._client.request("POST", "/v1/music_generation", json=body)
+        resp = self._http.request("POST", "/v1/music_generation", json=body)
         return _build_audio_response_from_music(resp)
 
     def generate_stream(
@@ -222,20 +222,15 @@ class Music(SyncResource):
             audio_setting=audio_setting,
         )
 
-        # Use the underlying httpx client directly for streaming.
-        with self._client._client.stream(
-            "POST",
-            "/v1/music_generation",
-            json=body,
-        ) as response:
-            for line in response.iter_lines():
-                event = _parse_sse_line(line)
-                if event is None:
-                    continue
-                data_section = event.get("data", {})
-                hex_audio = data_section.get("audio", "")
-                if hex_audio:
-                    yield decode_hex_audio(hex_audio)
+        raw_iter = self._http.stream_request("POST", "/v1/music_generation", json=body)
+        for line in raw_iter:
+            event = _parse_sse_line(line)
+            if event is None:
+                continue
+            data_section = event.get("data", {})
+            hex_audio = data_section.get("audio", "")
+            if hex_audio:
+                yield decode_hex_audio(hex_audio)
 
     def generate_lyrics(
         self,
@@ -265,7 +260,7 @@ class Music(SyncResource):
             title=title,
         )
 
-        resp = self._client.request("POST", "/v1/lyrics_generation", json=body)
+        resp = self._http.request("POST", "/v1/lyrics_generation", json=body)
         return _parse_lyrics_result(resp)
 
 
@@ -313,7 +308,7 @@ class AsyncMusic(AsyncResource):
             audio_setting=audio_setting,
         )
 
-        resp = await self._client.request("POST", "/v1/music_generation", json=body)
+        resp = await self._http.request("POST", "/v1/music_generation", json=body)
         return _build_audio_response_from_music(resp)
 
     async def generate_stream(
@@ -354,20 +349,15 @@ class AsyncMusic(AsyncResource):
             audio_setting=audio_setting,
         )
 
-        # Use the underlying httpx async client directly for streaming.
-        async with self._client._client.stream(
-            "POST",
-            "/v1/music_generation",
-            json=body,
-        ) as response:
-            async for line in response.aiter_lines():
-                event = _parse_sse_line(line)
-                if event is None:
-                    continue
-                data_section = event.get("data", {})
-                hex_audio = data_section.get("audio", "")
-                if hex_audio:
-                    yield decode_hex_audio(hex_audio)
+        raw_iter = self._http.stream_request("POST", "/v1/music_generation", json=body)
+        async for line in raw_iter:
+            event = _parse_sse_line(line)
+            if event is None:
+                continue
+            data_section = event.get("data", {})
+            hex_audio = data_section.get("audio", "")
+            if hex_audio:
+                yield decode_hex_audio(hex_audio)
 
     async def generate_lyrics(
         self,
@@ -397,5 +387,5 @@ class AsyncMusic(AsyncResource):
             title=title,
         )
 
-        resp = await self._client.request("POST", "/v1/lyrics_generation", json=body)
+        resp = await self._http.request("POST", "/v1/lyrics_generation", json=body)
         return _parse_lyrics_result(resp)

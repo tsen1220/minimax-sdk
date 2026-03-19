@@ -8,6 +8,7 @@ real-time speech synthesis.
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any, AsyncIterator, Iterator
 from urllib.parse import urlparse
 
@@ -21,6 +22,8 @@ from .._http import _raise_for_status
 from .._polling import async_poll_task, poll_task
 from ..exceptions import MiniMaxError
 from ..types.speech import TaskResult
+
+logger = logging.getLogger("minimax_sdk")
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
@@ -185,7 +188,7 @@ def _iter_sse_audio_chunks(raw_iter: Iterator[Any]) -> Iterator[bytes]:
     """
     for chunk in raw_iter:
         if isinstance(chunk, dict):
-            data_section = chunk.get("data", {})
+            data_section = chunk.get("data") or {}
             hex_audio = data_section.get("audio", "")
             if hex_audio:
                 yield decode_hex_audio(hex_audio)
@@ -201,7 +204,7 @@ def _iter_sse_audio_chunks(raw_iter: Iterator[Any]) -> Iterator[bytes]:
                 return
             try:
                 parsed = json.loads(text)
-                data_section = parsed.get("data", {})
+                data_section = parsed.get("data") or {}
                 hex_audio = data_section.get("audio", "")
                 if hex_audio:
                     yield decode_hex_audio(hex_audio)
@@ -213,7 +216,7 @@ async def _aiter_sse_audio_chunks(raw_iter: AsyncIterator[Any]) -> AsyncIterator
     """Async version of :func:`_iter_sse_audio_chunks`."""
     async for chunk in raw_iter:
         if isinstance(chunk, dict):
-            data_section = chunk.get("data", {})
+            data_section = chunk.get("data") or {}
             hex_audio = data_section.get("audio", "")
             if hex_audio:
                 yield decode_hex_audio(hex_audio)
@@ -228,7 +231,7 @@ async def _aiter_sse_audio_chunks(raw_iter: AsyncIterator[Any]) -> AsyncIterator
                 return
             try:
                 parsed = json.loads(text)
-                data_section = parsed.get("data", {})
+                data_section = parsed.get("data") or {}
                 hex_audio = data_section.get("audio", "")
                 if hex_audio:
                     yield decode_hex_audio(hex_audio)
@@ -338,6 +341,7 @@ class SpeechConnection:
         if self._closed:
             raise ConnectionError("SpeechConnection is already closed.")
 
+        logger.debug("WebSocket send text (%d chars)", len(text))
         continue_msg: dict[str, Any] = {
             "event": "task_continue",
             "text": text,
@@ -359,19 +363,15 @@ class SpeechConnection:
                 event = msg.get("event", "")
 
                 if event == "task_continued":
-                    data_section = msg.get("data", {})
+                    data_section = msg.get("data") or {}
                     hex_audio = data_section.get("audio", "")
                     if hex_audio:
                         hex_chunks.append(hex_audio)
-                    # Capture extra_info from the last chunk
                     if "extra_info" in msg:
                         extra_info = msg["extra_info"]
-
-                elif event == "task_complete":
-                    # All chunks received — finalize
-                    if "extra_info" in msg:
-                        extra_info = msg["extra_info"]
-                    break
+                    # is_final signals the last chunk for this text
+                    if msg.get("is_final"):
+                        break
 
                 elif event == "task_failed":
                     raise MiniMaxError(
@@ -411,6 +411,7 @@ class SpeechConnection:
         if self._closed:
             raise ConnectionError("SpeechConnection is already closed.")
 
+        logger.debug("WebSocket send text (%d chars, stream)", len(text))
         continue_msg: dict[str, Any] = {
             "event": "task_continue",
             "text": text,
@@ -429,13 +430,12 @@ class SpeechConnection:
                 event = msg.get("event", "")
 
                 if event == "task_continued":
-                    data_section = msg.get("data", {})
+                    data_section = msg.get("data") or {}
                     hex_audio = data_section.get("audio", "")
                     if hex_audio:
                         yield decode_hex_audio(hex_audio)
-
-                elif event == "task_complete":
-                    return
+                    if msg.get("is_final"):
+                        return
 
                 elif event == "task_failed":
                     raise MiniMaxError(
@@ -455,6 +455,7 @@ class SpeechConnection:
             return
         self._closed = True
 
+        logger.debug("WebSocket disconnecting")
         try:
             finish_msg: dict[str, Any] = {"event": "task_finish"}
             self._ws.send(json.dumps(finish_msg))
@@ -589,6 +590,7 @@ class AsyncSpeechConnection:
         if self._closed:
             raise ConnectionError("AsyncSpeechConnection is already closed.")
 
+        logger.debug("WebSocket send text (%d chars)", len(text))
         continue_msg: dict[str, Any] = {
             "event": "task_continue",
             "text": text,
@@ -610,17 +612,14 @@ class AsyncSpeechConnection:
                 event = msg.get("event", "")
 
                 if event == "task_continued":
-                    data_section = msg.get("data", {})
+                    data_section = msg.get("data") or {}
                     hex_audio = data_section.get("audio", "")
                     if hex_audio:
                         hex_chunks.append(hex_audio)
                     if "extra_info" in msg:
                         extra_info = msg["extra_info"]
-
-                elif event == "task_complete":
-                    if "extra_info" in msg:
-                        extra_info = msg["extra_info"]
-                    break
+                    if msg.get("is_final"):
+                        break
 
                 elif event == "task_failed":
                     raise MiniMaxError(
@@ -659,6 +658,7 @@ class AsyncSpeechConnection:
         if self._closed:
             raise ConnectionError("AsyncSpeechConnection is already closed.")
 
+        logger.debug("WebSocket send text (%d chars, stream)", len(text))
         continue_msg: dict[str, Any] = {
             "event": "task_continue",
             "text": text,
@@ -677,13 +677,12 @@ class AsyncSpeechConnection:
                 event = msg.get("event", "")
 
                 if event == "task_continued":
-                    data_section = msg.get("data", {})
+                    data_section = msg.get("data") or {}
                     hex_audio = data_section.get("audio", "")
                     if hex_audio:
                         yield decode_hex_audio(hex_audio)
-
-                elif event == "task_complete":
-                    return
+                    if msg.get("is_final"):
+                        return
 
                 elif event == "task_failed":
                     raise MiniMaxError(
@@ -703,6 +702,7 @@ class AsyncSpeechConnection:
             return
         self._closed = True
 
+        logger.debug("WebSocket disconnecting")
         try:
             finish_msg: dict[str, Any] = {"event": "task_finish"}
             await self._ws.send(json.dumps(finish_msg))
@@ -942,10 +942,17 @@ class Speech(SyncResource):
             If the server rejects the ``task_start`` request.
         """
         url = _ws_url(self._http.base_url)
-        headers = {"Authorization": f"Bearer {self._http.api_key}"}
+        headers = {"Authorization": f"Bearer {self._http._api_key}"}
 
+        import ssl
+
+        ssl_context = ssl.create_default_context()
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
+
+        logger.debug("WebSocket connecting to %s", url)
         try:
-            ws = websockets.sync.client.connect(url, additional_headers=headers)
+            ws = websockets.sync.client.connect(url, additional_headers=headers, ssl=ssl_context)
         except Exception as exc:
             raise ConnectionError(
                 f"Failed to establish WebSocket connection to {url}: {exc}"
@@ -953,7 +960,7 @@ class Speech(SyncResource):
 
         return SpeechConnection(
             ws,
-            self._http.api_key,
+            self._http._api_key,
             model,
             voice_setting,
             audio_setting=audio_setting,
@@ -1114,8 +1121,8 @@ class Speech(SyncResource):
         task_id = create_resp.get("task_id", "")
 
         # Step 2: Poll until done
-        interval = poll_interval if poll_interval is not None else self._poll_interval
-        timeout = poll_timeout if poll_timeout is not None else self._poll_timeout
+        interval = poll_interval if poll_interval is not None else self._client.poll_interval
+        timeout = poll_timeout if poll_timeout is not None else self._client.poll_timeout
 
         poll_result = poll_task(
             self._http,
@@ -1127,7 +1134,7 @@ class Speech(SyncResource):
 
         # Step 3: Retrieve file info for the download URL
         file_id = poll_result.get("file_id", "")
-        file_info = self._files.retrieve(file_id)
+        file_info = self._client.files.retrieve(file_id)
 
         return TaskResult(
             task_id=task_id,
@@ -1333,10 +1340,19 @@ class AsyncSpeech(AsyncResource):
             If the server rejects the ``task_start`` request.
         """
         url = _ws_url(self._http.base_url)
-        headers = {"Authorization": f"Bearer {self._http.api_key}"}
+        headers = {"Authorization": f"Bearer {self._http._api_key}"}
 
+        import ssl
+
+        ssl_context = ssl.create_default_context()
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
+
+        logger.debug("WebSocket connecting to %s", url)
         try:
-            ws = await websockets.asyncio.client.connect(url, additional_headers=headers)
+            ws = await websockets.asyncio.client.connect(
+                url, additional_headers=headers, ssl=ssl_context
+            )
         except Exception as exc:
             raise ConnectionError(
                 f"Failed to establish WebSocket connection to {url}: {exc}"
@@ -1344,7 +1360,7 @@ class AsyncSpeech(AsyncResource):
 
         conn = AsyncSpeechConnection(
             ws,
-            self._http.api_key,
+            self._http._api_key,
             model,
             voice_setting,
             audio_setting=audio_setting,
@@ -1506,8 +1522,8 @@ class AsyncSpeech(AsyncResource):
         task_id = create_resp.get("task_id", "")
 
         # Step 2: Poll until done
-        interval = poll_interval if poll_interval is not None else self._poll_interval
-        timeout = poll_timeout if poll_timeout is not None else self._poll_timeout
+        interval = poll_interval if poll_interval is not None else self._client.poll_interval
+        timeout = poll_timeout if poll_timeout is not None else self._client.poll_timeout
 
         poll_result = await async_poll_task(
             self._http,
@@ -1519,7 +1535,7 @@ class AsyncSpeech(AsyncResource):
 
         # Step 3: Retrieve file info for the download URL
         file_id = poll_result.get("file_id", "")
-        file_info = await self._files.retrieve(file_id)
+        file_info = await self._client.files.retrieve(file_id)
 
         return TaskResult(
             task_id=task_id,

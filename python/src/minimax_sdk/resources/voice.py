@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any, BinaryIO, Union
 
-from .._audio import AudioResponse, build_audio_response
+from .._audio import AudioResponse, build_audio_response, decode_hex_audio
 from .._base import AsyncResource, SyncResource
 from ..types.files import FileInfo
 from ..types.voice import (
@@ -17,6 +17,11 @@ from ..types.voice import (
     VoiceInfo,
     VoiceList,
 )
+
+# Rebuild models that reference AudioResponse via TYPE_CHECKING guard,
+# so Pydantic can resolve the forward reference at runtime.
+VoiceCloneResult.model_rebuild()
+VoiceDesignResult.model_rebuild()
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -40,7 +45,7 @@ def _build_clone_body(
     receives an explicit value.
     """
     body: dict[str, Any] = {
-        "file_id": file_id,
+        "file_id": int(file_id),
         "voice_id": voice_id,
         "need_noise_reduction": need_noise_reduction,
         "need_volume_normalization": need_volume_normalization,
@@ -63,15 +68,12 @@ def _parse_clone_result(resp: dict[str, Any], voice_id: str) -> VoiceCloneResult
     were supplied in the request), it is decoded into an
     :class:`AudioResponse`.
     """
-    demo_audio: AudioResponse | None = None
-    raw_demo = resp.get("demo_audio")
-    if raw_demo:
-        # demo_audio is a nested dict with hex audio data
-        demo_audio = build_audio_response(raw_demo)
+    # demo_audio is a URL string when text+model are provided, otherwise empty ""
+    demo_audio_url = resp.get("demo_audio", "")
 
     return VoiceCloneResult(
         voice_id=voice_id,
-        demo_audio=demo_audio,
+        demo_audio=demo_audio_url if demo_audio_url else None,
         input_sensitive=resp.get("input_sensitive"),
     )
 
@@ -79,10 +81,21 @@ def _parse_clone_result(resp: dict[str, Any], voice_id: str) -> VoiceCloneResult
 def _parse_design_result(resp: dict[str, Any]) -> VoiceDesignResult:
     """Parse the raw API response into a :class:`VoiceDesignResult`.
 
-    The ``trial_audio`` hex payload is decoded into an :class:`AudioResponse`.
+    The ``trial_audio`` is returned as a hex-encoded string by the API.
     """
-    raw_trial = resp.get("trial_audio", {})
-    trial_audio = build_audio_response(raw_trial)
+    raw_trial = resp.get("trial_audio", "")
+    trial_audio: AudioResponse | None = None
+    if raw_trial:
+        if isinstance(raw_trial, str):
+            # API returns trial_audio as a hex-encoded string (no metadata)
+            audio_bytes = decode_hex_audio(raw_trial)
+            trial_audio = AudioResponse(
+                data=audio_bytes,
+                size=len(audio_bytes),
+            )
+        else:
+            # Nested dict structure (fallback)
+            trial_audio = build_audio_response(raw_trial)
 
     return VoiceDesignResult(
         voice_id=resp["voice_id"],
@@ -93,9 +106,11 @@ def _parse_design_result(resp: dict[str, Any]) -> VoiceDesignResult:
 def _parse_voice_list(resp: dict[str, Any]) -> VoiceList:
     """Parse the raw API response into a :class:`VoiceList`."""
     return VoiceList(
-        system_voice=[VoiceInfo.model_validate(v) for v in resp.get("system_voice", [])],
-        voice_cloning=[VoiceInfo.model_validate(v) for v in resp.get("voice_cloning", [])],
-        voice_generation=[VoiceInfo.model_validate(v) for v in resp.get("voice_generation", [])],
+        system_voice=[VoiceInfo.model_validate(v) for v in (resp.get("system_voice") or [])],
+        voice_cloning=[VoiceInfo.model_validate(v) for v in (resp.get("voice_cloning") or [])],
+        voice_generation=[
+            VoiceInfo.model_validate(v) for v in (resp.get("voice_generation") or [])
+        ],
     )
 
 

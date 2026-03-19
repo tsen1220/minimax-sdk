@@ -4,7 +4,7 @@ Usage::
 
     from minimax_sdk import MiniMax
 
-    client = MiniMax()  # reads MINIMAX_API_KEY from .env or environment
+    client = MiniMax()  # reads MINIMAX_API_KEY from environment variable
     audio = client.speech.tts(text="Hello world", model="speech-2.8-hd", ...)
 """
 
@@ -23,7 +23,7 @@ from minimax_sdk.exceptions import (
     PollTimeoutError,
     RateLimitError,
     ServerError,
-    TimeoutError,
+    APITimeoutError,
     VoiceCloneError,
     VoiceDuplicateError,
     VoiceError,
@@ -55,7 +55,7 @@ __all__ = [
     "InputSafetyError",
     "OutputSafetyError",
     "InvalidParameterError",
-    "TimeoutError",
+    "APITimeoutError",
     "PollTimeoutError",
     "VoiceError",
     "VoiceCloneError",

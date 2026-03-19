@@ -4,39 +4,21 @@ from __future__ import annotations
 
 from typing import Optional
 
-from pydantic import BaseModel
-
-
-class SubjectReference(BaseModel):
-    """Subject reference for subject-driven video generation."""
-
-    type: str
-    image: str
-
-
-class VideoGenerationRequest(BaseModel):
-    """Request body for video generation (POST /v1/video_generation)."""
-
-    model: str
-    prompt: Optional[str] = None
-    prompt_optimizer: Optional[bool] = None
-    fast_pretreatment: Optional[bool] = None
-    duration: Optional[int] = None
-    resolution: Optional[str] = None
-    callback_url: Optional[str] = None
-    first_frame_image: Optional[str] = None
-    last_frame_image: Optional[str] = None
-    subject_reference: Optional[list[SubjectReference]] = None
+from pydantic import BaseModel, ConfigDict
 
 
 class VideoCreateResult(BaseModel):
     """Result of creating a video generation task."""
+
+    model_config = ConfigDict(coerce_numbers_to_str=True)
 
     task_id: str
 
 
 class VideoQueryResult(BaseModel):
     """Result of querying a video generation task status."""
+
+    model_config = ConfigDict(coerce_numbers_to_str=True)
 
     task_id: str
     status: str
@@ -51,9 +33,11 @@ class VideoResult(BaseModel):
     Returned by high-level methods that auto-poll until completion.
     """
 
+    model_config = ConfigDict(coerce_numbers_to_str=True)
+
     task_id: str
     status: str
     file_id: str
-    download_url: str
+    download_url: Optional[str] = None
     video_width: int
     video_height: int

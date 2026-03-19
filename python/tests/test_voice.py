@@ -42,7 +42,7 @@ class TestVoiceClone:
             "input_sensitive": {"is_sensitive": False},
         })
 
-        result = voice.clone(file_id="file_123", voice_id="my_voice")
+        result = voice.clone(file_id="123456", voice_id="my_voice")
 
         assert isinstance(result, VoiceCloneResult)
         assert result.voice_id == "my_voice"
@@ -54,27 +54,19 @@ class TestVoiceClone:
         call_kwargs = mock_http.request.call_args
         assert call_kwargs[0] == ("POST", "/v1/voice_clone")
         body = call_kwargs[1]["json"]
-        assert body["file_id"] == "file_123"
+        assert body["file_id"] == 123456
         assert body["voice_id"] == "my_voice"
 
-    def test_clone_with_demo_audio_decodes_hex(self):
-        """voice.clone() with demo_audio in the response decodes hex into AudioResponse."""
+    def test_clone_with_demo_audio_url(self):
+        """voice.clone() with demo_audio URL in the response."""
         voice, mock_http = _make_voice_resource()
         mock_http.request.return_value = _ok_resp({
-            "demo_audio": {
-                "data": {"audio": _SAMPLE_HEX},
-                "extra_info": {
-                    "audio_length": 1500.0,
-                    "audio_sample_rate": 32000,
-                    "audio_size": len(_SAMPLE_BYTES),
-                    "audio_format": "mp3",
-                },
-            },
-            "input_sensitive": {"is_sensitive": False},
+            "demo_audio": "https://cdn.minimax.io/demo/preview.mp3",
+            "input_sensitive": False,
         })
 
         result = voice.clone(
-            file_id="file_123",
+            file_id="123456",
             voice_id="my_voice",
             text="Hello world",
             model="speech-2.8-hd",
@@ -82,11 +74,19 @@ class TestVoiceClone:
 
         assert isinstance(result, VoiceCloneResult)
         assert result.voice_id == "my_voice"
-        assert isinstance(result.demo_audio, AudioResponse)
-        assert result.demo_audio.data == _SAMPLE_BYTES
-        assert result.demo_audio.duration == 1500.0
-        assert result.demo_audio.sample_rate == 32000
-        assert result.demo_audio.format == "mp3"
+        assert result.demo_audio == "https://cdn.minimax.io/demo/preview.mp3"
+
+    def test_clone_without_demo_audio(self):
+        """voice.clone() with empty demo_audio returns None."""
+        voice, mock_http = _make_voice_resource()
+        mock_http.request.return_value = _ok_resp({
+            "demo_audio": "",
+            "input_sensitive": False,
+        })
+
+        result = voice.clone(file_id="123456", voice_id="my_voice")
+
+        assert result.demo_audio is None
 
 
 class TestVoiceDesign:
@@ -194,7 +194,7 @@ class TestVoiceCloneAllOptions:
         })
 
         result = voice.clone(
-            file_id="file_123",
+            file_id="123456",
             voice_id="my_voice",
             clone_prompt={"prompt_audio": "file_456", "prompt_text": "Hello"},
             text="Hello world",
@@ -302,7 +302,7 @@ class TestAsyncVoiceClone:
             "input_sensitive": {"is_sensitive": False},
         })
 
-        result = await voice.clone(file_id="file_123", voice_id="my_voice")
+        result = await voice.clone(file_id="123456", voice_id="my_voice")
 
         assert isinstance(result, VoiceCloneResult)
         assert result.voice_id == "my_voice"
@@ -313,20 +313,12 @@ class TestAsyncVoiceClone:
         """Async voice.clone() with all optional params."""
         voice, mock_http = _make_async_voice_resource()
         mock_http.request.return_value = _ok_resp({
-            "demo_audio": {
-                "data": {"audio": _SAMPLE_HEX},
-                "extra_info": {
-                    "audio_length": 1500.0,
-                    "audio_sample_rate": 32000,
-                    "audio_size": len(_SAMPLE_BYTES),
-                    "audio_format": "mp3",
-                },
-            },
-            "input_sensitive": None,
+            "demo_audio": "https://cdn.minimax.io/demo/preview.mp3",
+            "input_sensitive": False,
         })
 
         result = await voice.clone(
-            file_id="file_123",
+            file_id="123456",
             voice_id="my_voice",
             clone_prompt={"prompt_audio": "f1", "prompt_text": "Hi"},
             text="Hello world",
@@ -337,8 +329,7 @@ class TestAsyncVoiceClone:
         )
 
         assert isinstance(result, VoiceCloneResult)
-        assert result.demo_audio is not None
-        assert result.demo_audio.data == _SAMPLE_BYTES
+        assert result.demo_audio == "https://cdn.minimax.io/demo/preview.mp3"
         body = mock_http.request.call_args[1]["json"]
         assert body["language_boost"] == "zh"
 

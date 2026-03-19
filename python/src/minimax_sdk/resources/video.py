@@ -126,26 +126,28 @@ class Video(SyncResource):
         task_id: str = create_resp["task_id"]
 
         # 2. Poll until the task reaches a terminal state.
-        interval = poll_interval if poll_interval is not None else self._poll_interval
-        timeout = poll_timeout if poll_timeout is not None else self._poll_timeout
+        interval = poll_interval if poll_interval is not None else self._client.poll_interval
+        timeout = poll_timeout if poll_timeout is not None else self._client.poll_timeout
 
         poll_resp = poll_task(
-            query_fn=lambda: self.query(task_id),
+            self._http,
+            _QUERY_PATH,
+            task_id,
             poll_interval=interval,
             poll_timeout=timeout,
         )
 
         # 3. Retrieve the file to obtain a download URL.
-        file_id: str = poll_resp["file_id"]
+        file_id: str = str(poll_resp.get("file_id", ""))
         file_info = self._client.files.retrieve(file_id)
 
         return VideoResult(
             task_id=task_id,
-            status=poll_resp["status"],
+            status=poll_resp.get("status", "Success"),
             file_id=file_id,
             download_url=file_info.download_url,
-            video_width=poll_resp["video_width"],
-            video_height=poll_resp["video_height"],
+            video_width=poll_resp.get("video_width", 0),
+            video_height=poll_resp.get("video_height", 0),
         )
 
     # ── High-level ───────────────────────────────────────────────────────
@@ -420,26 +422,28 @@ class AsyncVideo(AsyncResource):
         task_id: str = create_resp["task_id"]
 
         # 2. Poll until the task reaches a terminal state.
-        interval = poll_interval if poll_interval is not None else self._poll_interval
-        timeout = poll_timeout if poll_timeout is not None else self._poll_timeout
+        interval = poll_interval if poll_interval is not None else self._client.poll_interval
+        timeout = poll_timeout if poll_timeout is not None else self._client.poll_timeout
 
         poll_resp = await async_poll_task(
-            query_fn=lambda: self.query(task_id),
+            self._http,
+            _QUERY_PATH,
+            task_id,
             poll_interval=interval,
             poll_timeout=timeout,
         )
 
         # 3. Retrieve the file to obtain a download URL.
-        file_id: str = poll_resp["file_id"]
+        file_id: str = str(poll_resp.get("file_id", ""))
         file_info = await self._client.files.retrieve(file_id)
 
         return VideoResult(
             task_id=task_id,
-            status=poll_resp["status"],
+            status=poll_resp.get("status", "Success"),
             file_id=file_id,
             download_url=file_info.download_url,
-            video_width=poll_resp["video_width"],
-            video_height=poll_resp["video_height"],
+            video_width=poll_resp.get("video_width", 0),
+            video_height=poll_resp.get("video_height", 0),
         )
 
     # ── High-level ───────────────────────────────────────────────────────

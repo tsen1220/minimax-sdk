@@ -38,15 +38,3 @@ class AsyncResource:
     def __init__(self, http_client: AsyncHttpClient, client: AsyncMiniMax | None = None) -> None:
         self._http = http_client
         self._client = client
-
-
-# ── Common helpers ────────────────────────────────────────────────────────────
-
-
-def _decode_audio(hex_str: str) -> bytes:
-    """Decode a hex-encoded audio string into raw bytes.
-
-    MiniMax APIs return audio data as hex-encoded strings.  This helper
-    converts them back to the original binary representation.
-    """
-    return bytes.fromhex(hex_str)

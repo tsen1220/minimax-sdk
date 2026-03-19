@@ -7,8 +7,10 @@ with automatic error mapping, retry logic, and multipart upload support.
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from pathlib import Path
+from collections.abc import AsyncIterator, Iterator
 from typing import Any, BinaryIO
 
 import httpx
@@ -18,6 +20,10 @@ from minimax_sdk.exceptions import (
     RETRYABLE_CODES,
     MiniMaxError,
 )
+
+logger = logging.getLogger("minimax_sdk")
+
+_SDK_VERSION = "0.1.0"
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -76,7 +82,7 @@ class HttpClient:
         timeout: httpx.Timeout | None = None,
         max_retries: int = 2,
     ) -> None:
-        self.api_key = api_key
+        self._api_key = api_key
         self.base_url = base_url.rstrip("/")
         self.max_retries = max_retries
 
@@ -91,7 +97,10 @@ class HttpClient:
         self._client = httpx.Client(
             base_url=self.base_url,
             timeout=timeout,
-            headers={"Authorization": f"Bearer {api_key}"},
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "User-Agent": f"minimax-sdk-python/{_SDK_VERSION}",
+            },
         )
 
     # ── Core request ──────────────────────────────────────────────────────
@@ -109,6 +118,7 @@ class HttpClient:
         Raises a mapped :class:`MiniMaxError` subclass on API errors.
         Retries automatically on retryable status codes using exponential backoff.
         """
+        logger.debug("%s %s", method, path)
         last_exc: Exception | None = None
 
         for attempt in range(self.max_retries + 1):
@@ -129,16 +139,38 @@ class HttpClient:
             code, msg, trace_id = _parse_error(body)
 
             if code == 0:
+                logger.debug("%s %s -> 200 OK", method, path)
                 return body
 
             if _should_retry(code) and attempt < self.max_retries:
                 # For 1002 (Rate Limit), honour Retry-After header if present.
+                delay = _backoff_delay(attempt)
                 if code == 1002:
                     retry_after = _retry_after_seconds(response)
                     if retry_after is not None:
+                        logger.debug(
+                            "%s %s -> %d %s, retrying in %.1fs (attempt %d/%d)",
+                            method,
+                            path,
+                            code,
+                            msg,
+                            retry_after,
+                            attempt + 1,
+                            self.max_retries,
+                        )
                         time.sleep(retry_after)
                         continue
-                time.sleep(_backoff_delay(attempt))
+                logger.debug(
+                    "%s %s -> %d %s, retrying in %.1fs (attempt %d/%d)",
+                    method,
+                    path,
+                    code,
+                    msg,
+                    delay,
+                    attempt + 1,
+                    self.max_retries,
+                )
+                time.sleep(delay)
                 continue
 
             # Non-retryable or exhausted retries — raise immediately.
@@ -152,6 +184,56 @@ class HttpClient:
                 trace_id="",
             ) from last_exc
         raise MiniMaxError("Request failed with unknown error", code=0, trace_id="")
+
+    # ── Raw bytes request ────────────────────────────────────────────────
+
+    def request_bytes(
+        self,
+        method: str,
+        path: str,
+        **kwargs: Any,
+    ) -> bytes:
+        """Send an HTTP request and return raw response bytes.
+
+        Unlike :meth:`request`, this does **not** parse JSON — it returns
+        the raw binary content.  Used for endpoints that return file data
+        (e.g. ``/v1/files/retrieve_content``).
+
+        If the response is JSON with a non-zero ``base_resp.status_code``,
+        the appropriate MiniMax exception is raised.
+        """
+        logger.debug("%s %s (bytes)", method, path)
+        response = self._client.request(method, path, **kwargs)
+        response.raise_for_status()
+        # Check for MiniMax API error disguised as 200 OK
+        content_type = response.headers.get("content-type", "")
+        if "application/json" in content_type:
+            body = response.json()
+            _raise_for_status(body)
+        return response.content
+
+    # ── Stream request ────────────────────────────────────────────────────
+
+    def stream_request(
+        self,
+        method: str,
+        path: str,
+        **kwargs: Any,
+    ) -> Iterator[str]:
+        """Send an HTTP request and yield response lines as they arrive.
+
+        Uses the httpx ``stream()`` context manager for true streaming.
+        Each yielded value is a text line from the response body.
+        """
+        logger.debug("%s %s (stream)", method, path)
+        with self._client.stream(method, path, **kwargs) as response:
+            response.raise_for_status()
+            # Check content-type — if JSON, it's likely an error response
+            content_type = response.headers.get("content-type", "")
+            if "application/json" in content_type and "text/event-stream" not in content_type:
+                body = response.json()
+                _raise_for_status(body)
+            yield from response.iter_lines()
 
     # ── Upload ────────────────────────────────────────────────────────────
 
@@ -172,6 +254,7 @@ class HttpClient:
         purpose:
             Upload purpose (e.g. ``"voice_clone"``, ``"prompt_audio"``).
         """
+        logger.debug("POST %s (upload, purpose=%s)", path, purpose)
         if isinstance(file, (str, Path)):
             file_path = Path(file)
             with open(file_path, "rb") as fh:
@@ -220,7 +303,7 @@ class AsyncHttpClient:
         timeout: httpx.Timeout | None = None,
         max_retries: int = 2,
     ) -> None:
-        self.api_key = api_key
+        self._api_key = api_key
         self.base_url = base_url.rstrip("/")
         self.max_retries = max_retries
 
@@ -235,7 +318,10 @@ class AsyncHttpClient:
         self._client = httpx.AsyncClient(
             base_url=self.base_url,
             timeout=timeout,
-            headers={"Authorization": f"Bearer {api_key}"},
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "User-Agent": f"minimax-sdk-python/{_SDK_VERSION}",
+            },
         )
 
     # ── Core request ──────────────────────────────────────────────────────
@@ -247,6 +333,7 @@ class AsyncHttpClient:
         **kwargs: Any,
     ) -> dict[str, Any]:
         """Send an async HTTP request, decode JSON, map errors, and auto-retry."""
+        logger.debug("%s %s", method, path)
         last_exc: Exception | None = None
 
         for attempt in range(self.max_retries + 1):
@@ -267,15 +354,37 @@ class AsyncHttpClient:
             code, msg, trace_id = _parse_error(body)
 
             if code == 0:
+                logger.debug("%s %s -> 200 OK", method, path)
                 return body
 
             if _should_retry(code) and attempt < self.max_retries:
+                delay = _backoff_delay(attempt)
                 if code == 1002:
                     retry_after = _retry_after_seconds(response)
                     if retry_after is not None:
+                        logger.debug(
+                            "%s %s -> %d %s, retrying in %.1fs (attempt %d/%d)",
+                            method,
+                            path,
+                            code,
+                            msg,
+                            retry_after,
+                            attempt + 1,
+                            self.max_retries,
+                        )
                         await asyncio.sleep(retry_after)
                         continue
-                await asyncio.sleep(_backoff_delay(attempt))
+                logger.debug(
+                    "%s %s -> %d %s, retrying in %.1fs (attempt %d/%d)",
+                    method,
+                    path,
+                    code,
+                    msg,
+                    delay,
+                    attempt + 1,
+                    self.max_retries,
+                )
+                await asyncio.sleep(delay)
                 continue
 
             _raise_for_status(body)
@@ -288,6 +397,47 @@ class AsyncHttpClient:
             ) from last_exc
         raise MiniMaxError("Request failed with unknown error", code=0, trace_id="")
 
+    # ── Raw bytes request ────────────────────────────────────────────────
+
+    async def request_bytes(
+        self,
+        method: str,
+        path: str,
+        **kwargs: Any,
+    ) -> bytes:
+        """Send an async HTTP request and return raw response bytes."""
+        logger.debug("%s %s (bytes)", method, path)
+        response = await self._client.request(method, path, **kwargs)
+        response.raise_for_status()
+        content_type = response.headers.get("content-type", "")
+        if "application/json" in content_type:
+            body = response.json()
+            _raise_for_status(body)
+        return response.content
+
+    # ── Stream request ────────────────────────────────────────────────────
+
+    async def stream_request(
+        self,
+        method: str,
+        path: str,
+        **kwargs: Any,
+    ) -> AsyncIterator[str]:
+        """Send an async HTTP request and yield response lines as they arrive.
+
+        Uses the httpx ``stream()`` async context manager for true streaming.
+        Each yielded value is a text line from the response body.
+        """
+        logger.debug("%s %s (stream)", method, path)
+        async with self._client.stream(method, path, **kwargs) as response:
+            response.raise_for_status()
+            content_type = response.headers.get("content-type", "")
+            if "application/json" in content_type and "text/event-stream" not in content_type:
+                body = response.json()
+                _raise_for_status(body)
+            async for line in response.aiter_lines():
+                yield line
+
     # ── Upload ────────────────────────────────────────────────────────────
 
     async def upload(
@@ -297,6 +447,7 @@ class AsyncHttpClient:
         purpose: str,
     ) -> dict[str, Any]:
         """Upload a file via multipart/form-data (async)."""
+        logger.debug("POST %s (upload, purpose=%s)", path, purpose)
         if isinstance(file, (str, Path)):
             file_path = Path(file)
             with open(file_path, "rb") as fh:
