@@ -84,7 +84,7 @@ describe("Voice", () => {
         "/v1/voice_clone",
         {
           json: {
-            file_id: "12345",
+            file_id: 12345,
             voice_id: "my-voice-id",
             need_noise_reduction: false,
             need_volume_normalization: false,
@@ -150,14 +150,21 @@ describe("Voice", () => {
       expect(body.need_volume_normalization).toBe(true);
     });
 
-    it("passes file_id as string", async () => {
+    it("converts file_id to number", async () => {
       mockClient.request.mockResolvedValue({});
 
       await voice.clone("99999", "v-clone");
 
       const body = mockClient.request.mock.calls[0]![2].json;
-      expect(body.file_id).toBe("99999");
-      expect(typeof body.file_id).toBe("string");
+      expect(body.file_id).toBe(99999);
+      expect(typeof body.file_id).toBe("number");
+    });
+
+    it("throws on non-numeric file_id", async () => {
+      await expect(voice.clone("abc", "v-clone")).rejects.toThrow(
+        "file_id must be a numeric string",
+      );
+      expect(mockClient.request).not.toHaveBeenCalled();
     });
 
     it("returns input_sensitive from response", async () => {

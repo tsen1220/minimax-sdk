@@ -277,9 +277,8 @@ export class Speech extends APIResource {
     const { default: WebSocket } = await import("ws");
     const ws = new WebSocket(wsURL, {
       headers: {
-        Authorization: `Bearer ${(this._client._httpClient as any)._apiKey}`,
+        Authorization: `Bearer ${this._client._httpClient.getApiKey()}`,
       },
-      rejectUnauthorized: false,
     });
 
     await new Promise<void>((resolve, reject) => {
@@ -612,7 +611,17 @@ export class SpeechConnection {
         resolve = null;
       }
     };
+    const onClose = () => {
+      queue.push(new Error("WebSocket closed unexpectedly"));
+      if (resolve) { resolve(); resolve = null; }
+    };
+    const onError = (err: Error) => {
+      queue.push(err);
+      if (resolve) { resolve(); resolve = null; }
+    };
     this._ws.on("message", handler);
+    this._ws.once("close", onClose);
+    this._ws.once("error", onError);
 
     try {
       while (true) {
@@ -628,6 +637,8 @@ export class SpeechConnection {
       }
     } finally {
       this._ws.off("message", handler);
+      this._ws.off("close", onClose);
+      this._ws.off("error", onError);
     }
   }
 

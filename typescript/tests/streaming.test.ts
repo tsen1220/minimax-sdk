@@ -155,6 +155,55 @@ describe("parseSSEStream", () => {
     }
   });
 
+  it("should throw MiniMaxError on malformed JSON data", async () => {
+    const stream = streamFromLines([
+      "data: {not valid json}",
+      "",
+    ]);
+
+    await expect(async () => {
+      for await (const _ of parseSSEStream(stream)) {
+        // should not reach here
+      }
+    }).rejects.toThrow(MiniMaxError);
+
+    // Verify the error message includes the malformed data
+    const stream2 = streamFromLines([
+      "data: {not valid json}",
+      "",
+    ]);
+
+    try {
+      for await (const _ of parseSSEStream(stream2)) {
+        // intentionally empty
+      }
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      expect((err as MiniMaxError).message).toBe(
+        "Malformed SSE data: {not valid json}",
+      );
+    }
+  });
+
+  it("should throw MiniMaxError on trailing malformed JSON without empty line", async () => {
+    const stream = streamFromLines([
+      "data: {not valid json}",
+      // No empty line follows — EOF
+    ]);
+
+    try {
+      for await (const _ of parseSSEStream(stream)) {
+        // intentionally empty
+      }
+      expect.unreachable("should have thrown");
+    } catch (err) {
+      expect(err).toBeInstanceOf(MiniMaxError);
+      expect((err as MiniMaxError).message).toBe(
+        "Malformed SSE data: {not valid json}",
+      );
+    }
+  });
+
   it("should handle empty stream", async () => {
     const stream = streamFromLines([]);
 

@@ -36,7 +36,12 @@ export async function* parseSSEStream(
         dataBuf = data;
       } else if (line === "") {
         if (dataBuf) {
-          const payload = JSON.parse(dataBuf) as Record<string, unknown>;
+          let payload: Record<string, unknown>;
+          try {
+            payload = JSON.parse(dataBuf) as Record<string, unknown>;
+          } catch {
+            throw new MiniMaxError(`Malformed SSE data: ${dataBuf}`);
+          }
           dataBuf = "";
 
           const eventType = String(payload.type ?? "");
@@ -57,7 +62,12 @@ export async function* parseSSEStream(
 
     // Handle trailing event without empty line
     if (dataBuf) {
-      const payload = JSON.parse(dataBuf) as Record<string, unknown>;
+      let payload: Record<string, unknown>;
+      try {
+        payload = JSON.parse(dataBuf) as Record<string, unknown>;
+      } catch {
+        throw new MiniMaxError(`Malformed SSE data: ${dataBuf}`);
+      }
       const eventType = String(payload.type ?? "");
 
       if (eventType === "error") {

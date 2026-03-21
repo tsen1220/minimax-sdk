@@ -236,6 +236,33 @@ function makeClient(
   });
 }
 
+// ── _createAbortSignal ───────────────────────────────────────────────────────
+
+describe("HttpClient already-aborted signal", () => {
+  it("should reject immediately when signal is already aborted", async () => {
+    // Use a fetch mock that respects the abort signal, like real fetch does
+    const abortAwareFetch = vi.fn().mockImplementation((_url: string, init?: RequestInit) => {
+      if (init?.signal?.aborted) {
+        return Promise.reject(new DOMException("The operation was aborted.", "AbortError"));
+      }
+      return Promise.resolve({
+        status: 200,
+        ok: true,
+        json: () => Promise.resolve({ base_resp: { status_code: 0 } }),
+        headers: new Headers(),
+      });
+    });
+    const client = makeClient(abortAwareFetch, 0);
+
+    const ac = new AbortController();
+    ac.abort();
+
+    await expect(
+      client.request("GET", "/v1/test", { signal: ac.signal }),
+    ).rejects.toThrow();
+  });
+});
+
 // ── HttpClient.request() ────────────────────────────────────────────────────
 
 describe("HttpClient.request()", () => {

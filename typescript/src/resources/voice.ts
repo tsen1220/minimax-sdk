@@ -55,8 +55,12 @@ function buildCloneBody(opts: {
   need_noise_reduction: boolean;
   need_volume_normalization: boolean;
 }): Record<string, unknown> {
+  const numericFileId = Number(opts.file_id);
+  if (!Number.isFinite(numericFileId)) {
+    throw new Error("file_id must be a numeric string");
+  }
   const body: Record<string, unknown> = {
-    file_id: opts.file_id,
+    file_id: numericFileId,
     voice_id: opts.voice_id,
     need_noise_reduction: opts.need_noise_reduction,
     need_volume_normalization: opts.need_volume_normalization,

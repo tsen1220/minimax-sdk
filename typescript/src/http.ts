@@ -100,7 +100,7 @@ async function readErrorBody(
 export class HttpClient {
   readonly baseURL: string;
   readonly maxRetries: number;
-  private readonly _apiKey: string;
+  #apiKey: string;
   private readonly _timeout: number;
   private readonly _fetchFn: typeof fetch;
 
@@ -111,16 +111,21 @@ export class HttpClient {
     maxRetries: number;
     fetch?: typeof fetch;
   }) {
-    this._apiKey = opts.apiKey;
+    this.#apiKey = opts.apiKey;
     this.baseURL = opts.baseURL.replace(/\/+$/, "");
     this._timeout = opts.timeout;
     this.maxRetries = opts.maxRetries;
     this._fetchFn = opts.fetch ?? globalThis.fetch;
   }
 
+  /** @internal */
+  getApiKey(): string {
+    return this.#apiKey;
+  }
+
   private _headers(): Record<string, string> {
     return {
-      Authorization: `Bearer ${this._apiKey}`,
+      Authorization: `Bearer ${this.#apiKey}`,
       "Content-Type": "application/json",
       "User-Agent": `minimax-sdk-typescript/${VERSION}`,
     };
@@ -149,7 +154,11 @@ export class HttpClient {
 
     const handler = () => controller.abort();
     if (externalSignal) {
-      externalSignal.addEventListener("abort", handler);
+      if (externalSignal.aborted) {
+        controller.abort();
+      } else {
+        externalSignal.addEventListener("abort", handler);
+      }
     }
 
     return {
@@ -514,7 +523,7 @@ export class HttpClient {
         {
           method: "POST",
           headers: {
-            Authorization: `Bearer ${this._apiKey}`,
+            Authorization: `Bearer ${this.#apiKey}`,
             "User-Agent": `minimax-sdk-typescript/${VERSION}`,
           },
           body: formData,
