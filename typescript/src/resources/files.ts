@@ -103,7 +103,7 @@ export class Files extends APIResource {
    */
   async retrieve(fileId: string): Promise<FileInfo> {
     const resp = await this._client.request("GET", "/v1/files/retrieve", {
-      params: { file_id: String(Number(fileId)) },
+      params: { file_id: fileId },
     });
     return resp.file as FileInfo;
   }
@@ -116,7 +116,7 @@ export class Files extends APIResource {
    */
   async retrieveContent(fileId: string): Promise<ArrayBuffer> {
     return this._client.requestBytes("GET", "/v1/files/retrieve_content", {
-      params: { file_id: String(Number(fileId)) },
+      params: { file_id: fileId },
     });
   }
 
@@ -128,7 +128,7 @@ export class Files extends APIResource {
    */
   async delete(fileId: string, purpose: string): Promise<void> {
     await this._client.request("POST", "/v1/files/delete", {
-      json: { file_id: Number(fileId), purpose },
+      json: { file_id: fileId, purpose },
     });
   }
 }

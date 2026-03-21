@@ -146,7 +146,8 @@ function buildTTSBody(
     body.pronunciation_dict = params.pronunciationDict;
   if (params.timbreWeights !== undefined)
     body.timbre_weights = params.timbreWeights;
-  if (params.subtitleEnable) body.subtitle_enable = true;
+  if (params.subtitleEnable !== undefined)
+    body.subtitle_enable = params.subtitleEnable;
   return body;
 }
 

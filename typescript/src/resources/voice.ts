@@ -56,7 +56,7 @@ function buildCloneBody(opts: {
   need_volume_normalization: boolean;
 }): Record<string, unknown> {
   const body: Record<string, unknown> = {
-    file_id: Number(opts.file_id),
+    file_id: opts.file_id,
     voice_id: opts.voice_id,
     need_noise_reduction: opts.need_noise_reduction,
     need_volume_normalization: opts.need_volume_normalization,

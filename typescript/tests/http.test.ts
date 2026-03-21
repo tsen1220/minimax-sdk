@@ -516,7 +516,7 @@ describe("HttpClient.requestAnthropic()", () => {
     const mockFetch = vi.fn().mockResolvedValue({
       status: 429,
       ok: false,
-      json: () => Promise.resolve(errorBody),
+      text: () => Promise.resolve(JSON.stringify(errorBody)),
       headers: new Headers(),
     });
 
@@ -615,11 +615,10 @@ describe("HttpClient.streamRequestAnthropic", () => {
   });
 
   it("should throw on HTTP error with JSON body", async () => {
+    const errorBody = { error: { type: "authentication_error", message: "Bad key" } };
     const mockFetch = vi.fn().mockResolvedValue({
       status: 401,
-      json: async () => ({
-        error: { type: "authentication_error", message: "Bad key" },
-      }),
+      text: async () => JSON.stringify(errorBody),
     });
     const client = makeClient(mockFetch as unknown as typeof fetch);
 
@@ -631,7 +630,6 @@ describe("HttpClient.streamRequestAnthropic", () => {
   it("should throw on HTTP error with non-JSON body", async () => {
     const mockFetch = vi.fn().mockResolvedValue({
       status: 502,
-      json: async () => { throw new Error("no json"); },
       text: async () => "Bad Gateway",
     });
     const client = makeClient(mockFetch as unknown as typeof fetch);

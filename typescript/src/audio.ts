@@ -57,10 +57,11 @@ export function buildAudioResponse(
     data.extra_info ??
     {}) as Record<string, unknown>;
 
+  // Use || (not ??) so empty strings fall through, matching Python's `or`
   const hexStr =
-    (data.audio as string) ??
-    (resp.audio_hex as string) ??
-    (resp.audio as string) ??
+    (data.audio as string) ||
+    (resp.audio_hex as string) ||
+    (resp.audio as string) ||
     "";
   const audioBytes = decodeHexAudio(hexStr);
 

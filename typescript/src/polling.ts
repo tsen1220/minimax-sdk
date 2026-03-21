@@ -18,44 +18,43 @@ export async function pollTask(
     pollTimeout?: number;
   } = {},
 ): Promise<Record<string, unknown>> {
-  const interval = (opts.pollInterval ?? 5) * 1000;
-  const timeout = (opts.pollTimeout ?? 600) * 1000;
-  const deadline = Date.now() + timeout;
+  const intervalMs = (opts.pollInterval ?? 5) * 1000;
+  const timeoutMs = (opts.pollTimeout ?? 600) * 1000;
+  const deadline = Date.now() + timeoutMs;
 
   while (true) {
-    // Check deadline BEFORE sleep
-    if (Date.now() >= deadline) {
-      throw new PollTimeoutError(
-        `Task ${taskId} did not complete within ${opts.pollTimeout ?? 600}s`,
-      );
-    }
-
     const body = await http.request("GET", queryPath, {
       params: { task_id: taskId },
     });
 
-    const status = String(
-      (body as Record<string, unknown>).status ?? "",
-    );
+    const status = String(body.status ?? "");
 
     if (status === "Success") {
       return body;
     }
 
+    // FIX #5: Extract error from base_resp (matching Python), preserve code + trace_id
     if (status === "Fail") {
-      const msg = String(
-        (body as Record<string, unknown>).status_msg ??
-          (body as Record<string, unknown>).message ??
-          "Task failed",
+      const base = (body.base_resp ?? {}) as Record<string, unknown>;
+      const code = Number(base.status_code ?? 0);
+      const msg = String(base.status_msg ?? "Task failed");
+      const traceId = String(
+        body.trace_id ?? base.trace_id ?? "",
       );
-      throw new MiniMaxError(msg);
+      throw new MiniMaxError(msg, code, traceId);
     }
 
     if (!PENDING_STATUSES.has(status)) {
-      // Unknown status — log and continue
       console.warn(`Unknown poll status: ${status}`);
     }
 
-    await new Promise((resolve) => setTimeout(resolve, interval));
+    // FIX #4: Check deadline AFTER query, BEFORE sleep (matching Python)
+    if (Date.now() + intervalMs > deadline) {
+      throw new PollTimeoutError(
+        `Task ${taskId} did not complete within ${opts.pollTimeout ?? 600}s`,
+      );
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
 }

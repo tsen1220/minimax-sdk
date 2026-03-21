@@ -7,7 +7,6 @@
  */
 
 import { APIResource } from "../resource.js";
-import { MiniMaxError } from "../error.js";
 import { parseSSEStream } from "../streaming.js";
 
 // ── Content block types ─────────────────────────────────────────────────────

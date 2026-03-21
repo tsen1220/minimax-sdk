@@ -64,11 +64,11 @@ export function raiseAnthropicError(
 
 // ── Retry helpers ───────────────────────────────────────────────────────────
 
-const DEFAULT_BASE_DELAY = 1.0;
+const DEFAULT_BASE_DELAY_MS = 1000; // 1 second in milliseconds
 const ANTHROPIC_RETRYABLE_STATUS = new Set([429, 500, 529]);
 
-function backoffDelay(attempt: number, base = DEFAULT_BASE_DELAY): number {
-  return base * 2 ** attempt;
+function backoffDelayMs(attempt: number, baseMs = DEFAULT_BASE_DELAY_MS): number {
+  return baseMs * 2 ** attempt;
 }
 
 function retryAfterSeconds(headers: Headers): number | null {
@@ -80,6 +80,19 @@ function retryAfterSeconds(headers: Headers): number | null {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// ── Helpers for reading error response bodies ───────────────────────────────
+
+async function readErrorBody(
+  response: Response,
+): Promise<{ body: Record<string, unknown> | null; text: string }> {
+  const text = await response.text();
+  try {
+    return { body: JSON.parse(text) as Record<string, unknown>, text };
+  } catch {
+    return { body: null, text };
+  }
 }
 
 // ── HTTP Client ─────────────────────────────────────────────────────────────
@@ -113,11 +126,12 @@ export class HttpClient {
     };
   }
 
+  // FIX #8: Use string concatenation to preserve base URL path components
   private _buildURL(
     path: string,
     params?: Record<string, string>,
   ): string {
-    const url = new URL(path, this.baseURL);
+    const url = new URL(this.baseURL + path);
     if (params) {
       for (const [key, value] of Object.entries(params)) {
         url.searchParams.set(key, value);
@@ -126,19 +140,26 @@ export class HttpClient {
     return url.toString();
   }
 
+  // FIX #6: Remove event listener on cleanup to prevent memory leak
   private _createAbortSignal(
     externalSignal?: AbortSignal,
   ): { signal: AbortSignal; clear: () => void } {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this._timeout);
 
+    const handler = () => controller.abort();
     if (externalSignal) {
-      externalSignal.addEventListener("abort", () => controller.abort());
+      externalSignal.addEventListener("abort", handler);
     }
 
     return {
       signal: controller.signal,
-      clear: () => clearTimeout(timer),
+      clear: () => {
+        clearTimeout(timer);
+        if (externalSignal) {
+          externalSignal.removeEventListener("abort", handler);
+        }
+      },
     };
   }
 
@@ -167,12 +188,13 @@ export class HttpClient {
         clear();
 
         const body = (await response.json()) as Record<string, unknown>;
-        const { code, msg } = parseError(body);
+        const { code } = parseError(body);
 
         if (code === 0) return body;
 
+        // FIX #3: backoffDelayMs returns milliseconds directly
         if (RETRYABLE_CODES.has(code) && attempt < this.maxRetries) {
-          let delay = backoffDelay(attempt);
+          let delay = backoffDelayMs(attempt);
           if (code === 1002) {
             const ra = retryAfterSeconds(response.headers);
             if (ra != null) delay = ra * 1000;
@@ -187,7 +209,7 @@ export class HttpClient {
         if (err instanceof MiniMaxError) throw err;
         lastErr = err as Error;
         if (attempt < this.maxRetries) {
-          await sleep(backoffDelay(attempt));
+          await sleep(backoffDelayMs(attempt));
           continue;
         }
         throw new MiniMaxError(`HTTP transport error: ${lastErr.message}`);
@@ -230,7 +252,7 @@ export class HttpClient {
           ANTHROPIC_RETRYABLE_STATUS.has(response.status) &&
           attempt < this.maxRetries
         ) {
-          let delay = backoffDelay(attempt);
+          let delay = backoffDelayMs(attempt);
           if (response.status === 429) {
             const ra = retryAfterSeconds(response.headers);
             if (ra != null) delay = ra * 1000;
@@ -239,23 +261,21 @@ export class HttpClient {
           continue;
         }
 
-        // Non-retryable error
-        let body: Record<string, unknown>;
-        try {
-          body = (await response.json()) as Record<string, unknown>;
-        } catch {
-          throw new MiniMaxError(
-            `HTTP ${response.status}: ${await response.text()}`,
-            response.status,
-          );
+        // FIX #1: Read body as text first, then try JSON parse (avoid double-consume)
+        const { body, text } = await readErrorBody(response);
+        if (body) {
+          raiseAnthropicError(response.status, body);
         }
-        raiseAnthropicError(response.status, body);
+        throw new MiniMaxError(
+          `HTTP ${response.status}: ${text}`,
+          response.status,
+        );
       } catch (err) {
         clear();
         if (err instanceof MiniMaxError) throw err;
         lastErr = err as Error;
         if (attempt < this.maxRetries) {
-          await sleep(backoffDelay(attempt));
+          await sleep(backoffDelayMs(attempt));
           continue;
         }
         throw new MiniMaxError(`HTTP transport error: ${lastErr.message}`);
@@ -289,16 +309,15 @@ export class HttpClient {
 
     if (response.status !== 200) {
       clear();
-      let body: Record<string, unknown>;
-      try {
-        body = (await response.json()) as Record<string, unknown>;
-      } catch {
-        throw new MiniMaxError(
-          `HTTP ${response.status}: ${await response.text()}`,
-          response.status,
-        );
+      // FIX #1: Read as text first, then try JSON parse
+      const { body, text } = await readErrorBody(response);
+      if (body) {
+        raiseAnthropicError(response.status, body);
       }
-      raiseAnthropicError(response.status, body);
+      throw new MiniMaxError(
+        `HTTP ${response.status}: ${text}`,
+        response.status,
+      );
     }
 
     if (!response.body) {
@@ -306,31 +325,39 @@ export class HttpClient {
       throw new MiniMaxError("Response body is null");
     }
 
-    // Return a ReadableStream of text lines
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
 
+    // FIX #7: Add try/catch in pull() for proper cleanup on stream errors
     return new ReadableStream<string>({
       async pull(controller) {
-        const { done, value } = await reader.read();
-        if (done) {
-          // Flush remaining buffer
-          if (buffer.length > 0) {
-            controller.enqueue(buffer);
-            buffer = "";
+        try {
+          const { done, value } = await reader.read();
+          if (done) {
+            if (buffer.length > 0) {
+              controller.enqueue(buffer);
+              buffer = "";
+            }
+            clear();
+            controller.close();
+            return;
           }
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() ?? "";
+
+          for (const line of lines) {
+            controller.enqueue(line);
+          }
+        } catch (err) {
           clear();
-          controller.close();
-          return;
-        }
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
-
-        for (const line of lines) {
-          controller.enqueue(line);
+          controller.error(
+            new MiniMaxError(
+              `Stream error: ${(err as Error).message}`,
+            ),
+          );
         }
       },
       cancel() {
@@ -384,25 +411,35 @@ export class HttpClient {
     const decoder = new TextDecoder();
     let buffer = "";
 
+    // FIX #7: Add try/catch in pull()
     return new ReadableStream<string>({
       async pull(controller) {
-        const { done, value } = await reader.read();
-        if (done) {
-          if (buffer.length > 0) {
-            controller.enqueue(buffer);
-            buffer = "";
+        try {
+          const { done, value } = await reader.read();
+          if (done) {
+            if (buffer.length > 0) {
+              controller.enqueue(buffer);
+              buffer = "";
+            }
+            clear();
+            controller.close();
+            return;
           }
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() ?? "";
+
+          for (const line of lines) {
+            controller.enqueue(line);
+          }
+        } catch (err) {
           clear();
-          controller.close();
-          return;
-        }
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
-
-        for (const line of lines) {
-          controller.enqueue(line);
+          controller.error(
+            new MiniMaxError(
+              `Stream error: ${(err as Error).message}`,
+            ),
+          );
         }
       },
       cancel() {
@@ -464,8 +501,7 @@ export class HttpClient {
     purpose: string,
   ): Promise<Record<string, unknown>> {
     const formData = new FormData();
-    const blob =
-      file instanceof Blob ? file : new Blob([file]);
+    const blob = file instanceof Blob ? file : new Blob([file]);
     formData.append("file", blob, filename);
     formData.append("purpose", purpose);
 
