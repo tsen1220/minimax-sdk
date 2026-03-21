@@ -128,6 +128,29 @@ class TestVoiceDesign:
         assert body["preview_text"] == "Hello, this is a test."
 
 
+class TestVoiceDesignTrialAudioHex:
+    """Cover the trial_audio-as-hex-string branch (voice.py lines 91-92)."""
+
+    def test_design_trial_audio_as_hex_string(self):
+        """When trial_audio is a hex string, decode it directly."""
+        voice, mock_http = _make_voice_resource()
+        mock_http.request.return_value = _ok_resp({
+            "voice_id": "v_hex",
+            "trial_audio": _SAMPLE_HEX,
+        })
+
+        result = voice.design(
+            prompt="test voice",
+            preview_text="hello",
+        )
+
+        assert isinstance(result, VoiceDesignResult)
+        assert result.voice_id == "v_hex"
+        assert isinstance(result.trial_audio, AudioResponse)
+        assert result.trial_audio.data == _SAMPLE_BYTES
+        assert result.trial_audio.size == len(_SAMPLE_BYTES)
+
+
 class TestVoiceList:
     """Tests for voice.list()."""
 

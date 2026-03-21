@@ -803,6 +803,34 @@ class TestParseSSEEventsAsync:
         assert isinstance(events[0], MessageStopEvent)
 
     @pytest.mark.asyncio
+    async def test_unknown_event_mid_stream_skipped(self):
+        """Unknown event between valid events should be skipped (lines 155-156)."""
+        lines = (
+            _sse_line("message_start", {
+                "type": "message_start",
+                "message": {
+                    "id": "msg_unk2", "type": "message", "role": "assistant",
+                    "content": [], "model": "MiniMax-M2.7",
+                    "stop_reason": None, "stop_sequence": None,
+                    "usage": {"input_tokens": 5, "output_tokens": 1},
+                },
+            })
+            + _sse_line("unknown_future_event", {
+                "type": "unknown_future_event", "data": "something",
+            })
+            + _sse_line("message_stop", {"type": "message_stop"})
+        )
+
+        async def _async_iter():
+            for line in lines:
+                yield line
+
+        events = [event async for event in _parse_sse_events_async(_async_iter())]
+        assert len(events) == 2  # unknown skipped
+        assert isinstance(events[0], MessageStartEvent)
+        assert isinstance(events[1], MessageStopEvent)
+
+    @pytest.mark.asyncio
     async def test_trailing_error_raises(self):
         lines = [
             "event: error",

@@ -1513,3 +1513,143 @@ class TestAsyncHttpClientStreamRequestAnthropic:
                 "POST", "/anthropic/v1/messages", json={}
             ):
                 pass
+
+
+# ── request_anthropic fallback paths ─────────────────────────────────────────
+
+
+class TestRequestAnthropicFallbackPaths:
+    """Cover the post-loop fallback raises in request_anthropic()."""
+
+    def test_zero_iterations_unknown_error(self) -> None:
+        client = HttpClient(api_key="sk-key", max_retries=-1)
+        with pytest.raises(MiniMaxError, match="Request failed with unknown error"):
+            client.request_anthropic("POST", "/anthropic/v1/messages", json={})
+        client.close()
+
+    @patch("minimax_sdk._http.time.sleep", return_value=None)
+    def test_last_exc_fallback(self, mock_sleep: MagicMock) -> None:
+        client = HttpClient(api_key="sk-key", max_retries=1)
+        client._client = MagicMock()
+        # First attempt: transport error (retryable)
+        # Second attempt: also transport error (exhausted)
+        client._client.request.side_effect = httpx.ConnectError("fail")
+        with pytest.raises(MiniMaxError, match="HTTP transport error"):
+            client.request_anthropic("POST", "/anthropic/v1/messages", json={})
+
+    @patch("minimax_sdk._http._raise_anthropic_error")
+    @patch("minimax_sdk._http.time.sleep", return_value=None)
+    def test_post_loop_last_exc_fallback(
+        self, mock_sleep: MagicMock, mock_raise: MagicMock
+    ) -> None:
+        """Cover post-loop last_exc path (line 277)."""
+        client = HttpClient(api_key="sk-key", max_retries=1)
+
+        error_resp = MagicMock(spec=httpx.Response)
+        error_resp.status_code = 400
+        error_resp.json.return_value = {"type": "error", "error": {"type": "x", "message": "x"}}
+
+        client._client = MagicMock()
+        # attempt 0: transport error → sets last_exc, continues
+        # attempt 1: non-200, _raise_anthropic_error patched → falls through
+        client._client.request.side_effect = [
+            httpx.ConnectError("fail"),
+            error_resp,
+        ]
+
+        with pytest.raises(MiniMaxError, match="Request failed after"):
+            client.request_anthropic("POST", "/anthropic/v1/messages", json={})
+
+
+class TestAsyncRequestAnthropicFallbackPaths:
+    """Cover the post-loop fallback raises in async request_anthropic()."""
+
+    @pytest.mark.asyncio
+    async def test_zero_iterations_unknown_error(self) -> None:
+        client = AsyncHttpClient(api_key="sk-key", max_retries=-1)
+        with pytest.raises(MiniMaxError, match="Request failed with unknown error"):
+            await client.request_anthropic("POST", "/anthropic/v1/messages", json={})
+
+    @pytest.mark.asyncio
+    async def test_last_exc_fallback(self) -> None:
+        client = AsyncHttpClient(api_key="sk-key", max_retries=1)
+        client._client = AsyncMock()
+        client._client.request.side_effect = httpx.ConnectError("fail")
+        with pytest.raises(MiniMaxError, match="HTTP transport error"):
+            await client.request_anthropic("POST", "/anthropic/v1/messages", json={})
+
+    @pytest.mark.asyncio
+    async def test_transport_error_retries_then_succeeds(self) -> None:
+        """Cover async transport error retry + continue path (lines 553-554)."""
+        client = AsyncHttpClient(api_key="sk-key", max_retries=1)
+
+        ok_resp = MagicMock(spec=httpx.Response)
+        ok_resp.status_code = 200
+        ok_resp.json.return_value = {"id": "msg_ok", "type": "message", "content": []}
+
+        client._client = AsyncMock()
+        client._client.request.side_effect = [
+            httpx.ConnectError("fail"),
+            ok_resp,
+        ]
+
+        result = await client.request_anthropic("POST", "/anthropic/v1/messages", json={})
+        assert result["id"] == "msg_ok"
+
+    @patch("minimax_sdk._http._raise_anthropic_error")
+    def test_post_loop_last_exc_fallback(self, mock_raise: MagicMock) -> None:
+        """Cover post-loop last_exc path (line 277) by patching _raise_anthropic_error."""
+        client = HttpClient(api_key="sk-key", max_retries=1)
+
+        error_resp = MagicMock(spec=httpx.Response)
+        error_resp.status_code = 400
+        error_resp.json.return_value = {"type": "error", "error": {"type": "x", "message": "x"}}
+
+        client._client = MagicMock()
+        # attempt 0: transport error → sets last_exc, continues
+        # attempt 1: non-200 with _raise_anthropic_error patched → falls through
+        client._client.request.side_effect = [
+            httpx.ConnectError("fail"),
+            error_resp,
+        ]
+
+        with pytest.raises(MiniMaxError, match="Request failed after"):
+            client.request_anthropic("POST", "/anthropic/v1/messages", json={})
+
+    @pytest.mark.asyncio
+    @patch("minimax_sdk._http._raise_anthropic_error")
+    async def test_post_loop_last_exc_fallback(self, mock_raise: MagicMock) -> None:
+        """Cover async post-loop last_exc path (line 600)."""
+        client = AsyncHttpClient(api_key="sk-key", max_retries=1)
+
+        error_resp = MagicMock(spec=httpx.Response)
+        error_resp.status_code = 400
+        error_resp.json.return_value = {"type": "error", "error": {"type": "x", "message": "x"}}
+
+        client._client = AsyncMock()
+        client._client.request.side_effect = [
+            httpx.ConnectError("fail"),
+            error_resp,
+        ]
+
+        with pytest.raises(MiniMaxError, match="Request failed after"):
+            await client.request_anthropic("POST", "/anthropic/v1/messages", json={})
+
+    @pytest.mark.asyncio
+    async def test_retry_after_header_honored(self) -> None:
+        """Cover async 429 with Retry-After header (line 575)."""
+        client = AsyncHttpClient(api_key="sk-key", max_retries=1)
+
+        rate_resp = MagicMock(spec=httpx.Response)
+        rate_resp.status_code = 429
+        rate_resp.headers = {"retry-after": "0.01"}
+
+        ok_resp = MagicMock(spec=httpx.Response)
+        ok_resp.status_code = 200
+        ok_resp.json.return_value = {"id": "msg_retry", "type": "message", "content": []}
+
+        client._client = AsyncMock()
+        client._client.request.side_effect = [rate_resp, ok_resp]
+
+        result = await client.request_anthropic("POST", "/anthropic/v1/messages", json={})
+        assert result["id"] == "msg_retry"
