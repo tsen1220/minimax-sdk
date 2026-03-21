@@ -114,14 +114,14 @@ describe("Speech async", () => {
     });
 
     console.log(
-      `\n  task_id=${result.taskId}  status=${result.status}  ` +
-        `file_id=${result.fileId}  url=${result.downloadUrl?.slice(0, 60)}...`,
+      `\n  task_id=${result.task_id}  status=${result.status}  ` +
+        `file_id=${result.file_id}  url=${result.download_url?.slice(0, 60)}...`,
     );
 
-    expect(result.taskId).toBeTruthy();
+    expect(result.task_id).toBeTruthy();
     expect(result.status).toBeTruthy();
-    expect(result.fileId).toBeTruthy();
-    expect(result.downloadUrl).toBeTruthy();
-    expect(result.downloadUrl).toMatch(/^https?:/);
+    expect(result.file_id).toBeTruthy();
+    expect(result.download_url).toBeTruthy();
+    expect(result.download_url).toMatch(/^https?:/);
   });
 });

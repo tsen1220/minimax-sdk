@@ -116,10 +116,10 @@ export interface AsyncGenerateParams extends AsyncCreateParams {
 
 /** Final result of a completed async task (create + poll + retrieve). */
 export interface TaskResult {
-  taskId: string;
+  task_id: string;
   status: string;
-  fileId: string;
-  downloadUrl: string;
+  file_id: string;
+  download_url: string;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -316,10 +316,10 @@ export class Speech extends APIResource {
     const downloadUrl = fileInfo.download_url ?? "";
 
     return {
-      taskId,
+      task_id: taskId,
       status: String(pollResult.status ?? "Success"),
-      fileId,
-      downloadUrl,
+      file_id: fileId,
+      download_url: downloadUrl,
     };
   }
 }

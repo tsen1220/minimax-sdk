@@ -307,10 +307,10 @@ describe("Speech", () => {
         pollTimeout: 10,
       });
 
-      expect(result.taskId).toBe("task_100");
+      expect(result.task_id).toBe("task_100");
       expect(result.status).toBe("Success");
-      expect(result.fileId).toBe("file_200");
-      expect(result.downloadUrl).toBe("https://cdn.minimax.io/files/file_200");
+      expect(result.file_id).toBe("file_200");
+      expect(result.download_url).toBe("https://cdn.minimax.io/files/file_200");
 
       // Verify asyncCreate was called
       expect(mockClient.request).toHaveBeenCalledWith(
