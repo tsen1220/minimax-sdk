@@ -1,6 +1,6 @@
 # MiniMax SDK for Python
 
-Python SDK for [MiniMax](https://platform.minimax.io/) multimodal APIs -- Speech, Voice, Video, Image, Music, and File management.
+Python SDK for [MiniMax](https://platform.minimax.io/) multimodal APIs -- Text, Speech, Voice, Video, Image, Music, and File management.
 
 [![PyPI version](https://img.shields.io/pypi/v/minimax-sdk.svg)](https://pypi.org/project/minimax-sdk/)
 [![Python](https://img.shields.io/pypi/pyversions/minimax-sdk.svg)](https://pypi.org/project/minimax-sdk/)
@@ -12,13 +12,13 @@ Python SDK for [MiniMax](https://platform.minimax.io/) multimodal APIs -- Speech
 - [Quick Start](#quick-start)
 - [Configuration](#configuration)
 - [Resources](#resources)
+  - [Text](#text----clienttext)
   - [Speech](#speech----clientspeech)
   - [Voice](#voice----clientvoice)
   - [Video](#video----clientvideo)
   - [Image](#image----clientimage)
   - [Music](#music----clientmusic)
   - [Files](#files----clientfiles)
-- [Text Generation](#text-generation)
 - [Async Support](#async-support)
 - [Error Handling](#error-handling)
 - [License](#license)
@@ -37,6 +37,13 @@ pip install minimax-sdk
 from minimax_sdk import MiniMax
 
 client = MiniMax(api_key="your-api-key")
+
+# Text generation
+result = client.text.create(
+    model="MiniMax-M2.7",
+    messages=[{"role": "user", "content": "Hello"}],
+    max_tokens=1024,
+)
 
 # Text-to-Speech
 audio = client.speech.tts(text="Hello world", model="speech-2.8-hd")
@@ -90,6 +97,88 @@ client = MiniMax()
 ```
 
 ## Resources
+
+### Text -- `client.text`
+
+Uses MiniMax's Anthropic-compatible endpoint (`/anthropic/v1/messages`). Supports models: `MiniMax-M2.7`, `MiniMax-M2.5`, `MiniMax-M2.1`, `MiniMax-M2`, and their highspeed variants.
+
+#### Basic Text Generation
+
+```python
+result = client.text.create(
+    model="MiniMax-M2.7",
+    messages=[{"role": "user", "content": "Hello"}],
+    max_tokens=1024,
+)
+# MiniMax models may return ThinkingBlocks before TextBlocks
+for block in result.content:
+    if block.type == "text":
+        print(block.text)
+```
+
+#### With System Prompt
+
+```python
+result = client.text.create(
+    model="MiniMax-M2.7",
+    messages=[{"role": "user", "content": "Explain quantum computing"}],
+    max_tokens=1024,
+    system="You are a physics professor. Explain concisely.",
+    temperature=0.7,
+)
+```
+
+#### Streaming
+
+```python
+for event in client.text.create_stream(
+    model="MiniMax-M2.7",
+    messages=[{"role": "user", "content": "Write a short poem"}],
+    max_tokens=512,
+):
+    if event.type == "content_block_delta" and event.delta.type == "text_delta":
+        print(event.delta.text, end="", flush=True)
+```
+
+#### Tool Use (Function Calling)
+
+```python
+result = client.text.create(
+    model="MiniMax-M2.7",
+    messages=[{"role": "user", "content": "What's the weather in Tokyo?"}],
+    max_tokens=1024,
+    tools=[{
+        "name": "get_weather",
+        "description": "Get current weather for a location",
+        "input_schema": {
+            "type": "object",
+            "properties": {"location": {"type": "string"}},
+            "required": ["location"],
+        },
+    }],
+)
+
+for block in result.content:
+    if block.type == "tool_use":
+        print(f"Call {block.name} with {block.input}")
+```
+
+#### Extended Thinking
+
+```python
+result = client.text.create(
+    model="MiniMax-M2.7",
+    messages=[{"role": "user", "content": "Solve: what is 127 * 389?"}],
+    max_tokens=4096,
+    thinking={"type": "enabled", "budget_tokens": 2048},
+)
+
+for block in result.content:
+    if block.type == "thinking":
+        print(f"Thinking: {block.thinking}")
+    elif block.type == "text":
+        print(f"Answer: {block.text}")
+```
 
 ### Speech -- `client.speech`
 
@@ -341,30 +430,6 @@ content = client.files.retrieve_content(file_id="123")
 client.files.delete(file_id="123", purpose="voice_clone")
 ```
 
-## Text Generation
-
-Text generation uses the [Anthropic SDK](https://github.com/anthropics/anthropic-sdk-python) with MiniMax's Anthropic-compatible endpoint:
-
-```bash
-pip install anthropic
-```
-
-```python
-import anthropic
-
-client = anthropic.Anthropic(
-    api_key="your-minimax-api-key",
-    base_url="https://api.minimax.io/anthropic",
-)
-
-message = client.messages.create(
-    model="MiniMax-M2.5",
-    max_tokens=1024,
-    messages=[{"role": "user", "content": "Hello"}],
-)
-print(message.content[0].text)
-```
-
 ## Async Support
 
 Every resource method has an async counterpart via `AsyncMiniMax`. The API is identical -- just add `await`:
@@ -375,6 +440,22 @@ from minimax_sdk import AsyncMiniMax
 
 async def main():
     client = AsyncMiniMax(api_key="your-api-key")
+
+    # Text generation
+    result = await client.text.create(
+        model="MiniMax-M2.7",
+        messages=[{"role": "user", "content": "Hello"}],
+        max_tokens=1024,
+    )
+
+    # Streaming text
+    async for event in client.text.create_stream(
+        model="MiniMax-M2.7",
+        messages=[{"role": "user", "content": "Hello"}],
+        max_tokens=1024,
+    ):
+        if event.type == "content_block_delta" and event.delta.type == "text_delta":
+            print(event.delta.text, end="")
 
     # All methods are awaitable
     audio = await client.speech.tts(text="Hello", model="speech-2.8-hd")
