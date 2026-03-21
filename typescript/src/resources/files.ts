@@ -128,7 +128,7 @@ export class Files extends APIResource {
    */
   async delete(fileId: string, purpose: string): Promise<void> {
     await this._client.request("POST", "/v1/files/delete", {
-      json: { file_id: fileId, purpose },
+      json: { file_id: Number(fileId), purpose },
     });
   }
 }
