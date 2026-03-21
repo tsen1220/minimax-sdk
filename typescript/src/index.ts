@@ -94,6 +94,7 @@ export type {
 
 // Music types
 export type {
+  MusicAudioSetting,
   MusicGenerateParams,
   MusicGenerateStreamParams,
   LyricsGenerateParams,

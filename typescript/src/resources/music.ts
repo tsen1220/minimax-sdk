@@ -15,7 +15,7 @@ import { parseNativeSSEAudioChunks } from "../streaming.js";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
-export interface AudioSetting {
+export interface MusicAudioSetting {
   sample_rate?: number;
   bitrate?: number;
   format?: string;
@@ -28,7 +28,7 @@ export interface MusicGenerateParams {
   output_format?: string;
   lyrics_optimizer?: boolean;
   is_instrumental?: boolean;
-  audio_setting?: AudioSetting;
+  audio_setting?: MusicAudioSetting;
 }
 
 export interface MusicGenerateStreamParams {
@@ -37,7 +37,7 @@ export interface MusicGenerateStreamParams {
   lyrics?: string;
   lyrics_optimizer?: boolean;
   is_instrumental?: boolean;
-  audio_setting?: AudioSetting;
+  audio_setting?: MusicAudioSetting;
 }
 
 export interface LyricsGenerateParams {
@@ -63,7 +63,7 @@ function buildMusicBody(opts: {
   output_format?: string;
   lyrics_optimizer: boolean;
   is_instrumental: boolean;
-  audio_setting?: AudioSetting;
+  audio_setting?: MusicAudioSetting;
 }): Record<string, unknown> {
   const body: Record<string, unknown> = {
     model: opts.model,
@@ -165,7 +165,7 @@ export class Music extends APIResource {
       outputFormat?: string;
       lyricsOptimizer?: boolean;
       isInstrumental?: boolean;
-      audioSetting?: AudioSetting;
+      audioSetting?: MusicAudioSetting;
     } = {},
   ): Promise<AudioResponse> {
     const body = buildMusicBody({
@@ -207,7 +207,7 @@ export class Music extends APIResource {
       lyrics?: string;
       lyricsOptimizer?: boolean;
       isInstrumental?: boolean;
-      audioSetting?: AudioSetting;
+      audioSetting?: MusicAudioSetting;
     } = {},
   ): AsyncGenerator<Buffer> {
     const body = buildMusicBody({

@@ -290,6 +290,26 @@ const result = await client.video.imageToVideo(
 );
 ```
 
+#### First and Last Frame to Video
+
+```typescript
+const result = await client.video.framesToVideo(
+  "https://example.com/end.jpg",
+  "MiniMax-Hailuo-02",
+  { firstFrameImage: "https://example.com/start.jpg" },
+);
+```
+
+#### Subject Reference Video
+
+```typescript
+const result = await client.video.subjectToVideo(
+  [{ type: "character", image: ["https://example.com/face.jpg"] }],
+  "S2V-01",
+  { prompt: "A person waving at the camera" },
+);
+```
+
 #### Low-Level Control
 
 ```typescript

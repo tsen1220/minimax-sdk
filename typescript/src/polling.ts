@@ -45,7 +45,7 @@ export async function pollTask(
     }
 
     if (!PENDING_STATUSES.has(status)) {
-      console.warn(`Unknown poll status: ${status}`);
+      // Unknown status — continue polling silently
     }
 
     // FIX #4: Check deadline AFTER query, BEFORE sleep (matching Python)
