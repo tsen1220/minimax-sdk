@@ -61,6 +61,8 @@ export type {
 } from "./resources/text.js";
 
 // Speech types
+export { SpeechConnection } from "./resources/speech.js";
+
 export type {
   VoiceSetting,
   AudioSetting,

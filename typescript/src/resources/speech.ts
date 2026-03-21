@@ -14,7 +14,13 @@
  */
 
 import { APIResource } from "../resource.js";
-import { AudioResponse, buildAudioResponse } from "../audio.js";
+import {
+  AudioResponse,
+  buildAudioResponse,
+  decodeHexAudio,
+} from "../audio.js";
+import { MiniMaxError } from "../error.js";
+import { raiseForStatus } from "../http.js";
 import { pollTask } from "../polling.js";
 import { parseNativeSSEAudioChunks } from "../streaming.js";
 import type { FileInfo } from "./files.js";
@@ -24,6 +30,7 @@ import type { FileInfo } from "./files.js";
 const T2A_PATH = "/v1/t2a_v2";
 const T2A_ASYNC_PATH = "/v1/t2a_async_v2";
 const T2A_ASYNC_QUERY_PATH = "/v1/query/t2a_async_query_v2";
+const WS_T2A_PATH = "/ws/v1/t2a_v2";
 
 // ── Type interfaces ──────────────────────────────────────────────────────────
 
@@ -229,19 +236,61 @@ export class Speech extends APIResource {
     yield* parseNativeSSEAudioChunks(stream);
   }
 
-  // ── WebSocket TTS (placeholder) ──────────────────────────────────────
+  // ── WebSocket TTS ──────────────────────────────────────────────────────
 
-  // TODO: WebSocket-based real-time TTS via `wss://{host}/ws/v1/t2a_v2`.
-  //
-  // The connect() method will open a WebSocket connection and return a
-  // SpeechConnection object that supports:
-  //   - send(text) -> Promise<AudioResponse>  (collect all chunks)
-  //   - sendStream(text) -> AsyncGenerator<Buffer>  (yield chunks)
-  //   - close() -> Promise<void>
-  //
-  // Protocol: task_start -> task_started -> task_continue -> task_continued* -> task_finish -> task_finished
-  //
-  // This will be implemented separately due to WebSocket complexity.
+  /**
+   * Open a WebSocket connection for real-time, multi-turn TTS.
+   *
+   * Returns a {@link SpeechConnection} that supports sending multiple
+   * texts over a single connection. The connection uses the
+   * `task_start` / `task_continue` / `task_finish` protocol.
+   *
+   * Usage:
+   * ```typescript
+   * const conn = await client.speech.connect({
+   *   model: "speech-2.8-hd",
+   *   voiceSetting: { voice_id: "English_expressive_narrator" },
+   * });
+   * try {
+   *   const audio = await conn.send("Hello!");
+   *   await audio.save("hello.mp3");
+   * } finally {
+   *   await conn.close();
+   * }
+   * ```
+   */
+  async connect(params: {
+    model: string;
+    voiceSetting: VoiceSetting;
+    audioSetting?: AudioSetting;
+    languageBoost?: string;
+    voiceModify?: VoiceModify;
+    pronunciationDict?: PronunciationDict;
+    timbreWeights?: TimbreWeight[];
+  }): Promise<SpeechConnection> {
+    const baseURL = this._client._httpClient.baseURL;
+    const parsed = new URL(baseURL);
+    const wsURL = `wss://${parsed.host}${WS_T2A_PATH}`;
+
+    const config = buildWSConfig(params);
+
+    const { default: WebSocket } = await import("ws");
+    const ws = new WebSocket(wsURL, {
+      headers: {
+        Authorization: `Bearer ${(this._client._httpClient as any)._apiKey}`,
+      },
+      rejectUnauthorized: false,
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      ws.once("open", resolve);
+      ws.once("error", reject);
+    });
+
+    const conn = new SpeechConnection(ws, config);
+    await conn._start();
+    return conn;
+  }
 
   // ── Async TTS (long text) ────────────────────────────────────────────
 
@@ -321,5 +370,274 @@ export class Speech extends APIResource {
       file_id: fileId,
       download_url: downloadUrl,
     };
+  }
+}
+
+// ── WebSocket helpers ─────────────────────────────────────────────────────
+
+function buildWSConfig(params: {
+  model: string;
+  voiceSetting: VoiceSetting;
+  audioSetting?: AudioSetting;
+  languageBoost?: string;
+  voiceModify?: VoiceModify;
+  pronunciationDict?: PronunciationDict;
+  timbreWeights?: TimbreWeight[];
+}): Record<string, unknown> {
+  const config: Record<string, unknown> = {
+    model: params.model,
+    voice_setting: params.voiceSetting,
+  };
+  if (params.audioSetting !== undefined)
+    config.audio_setting = params.audioSetting;
+  if (params.languageBoost !== undefined)
+    config.language_boost = params.languageBoost;
+  if (params.voiceModify !== undefined)
+    config.voice_modify = params.voiceModify;
+  if (params.pronunciationDict !== undefined)
+    config.pronunciation_dict = params.pronunciationDict;
+  if (params.timbreWeights !== undefined)
+    config.timbre_weights = params.timbreWeights;
+  return config;
+}
+
+function parseWSMessage(raw: string | Buffer): Record<string, unknown> {
+  const text = typeof raw === "string" ? raw : raw.toString("utf-8");
+  const msg = JSON.parse(text) as Record<string, unknown>;
+  const baseResp = (msg.base_resp ?? {}) as Record<string, unknown>;
+  const code = Number(baseResp.status_code ?? 0);
+  if (code !== 0) {
+    raiseForStatus(msg);
+  }
+  return msg;
+}
+
+function audioResponseFromWSChunks(
+  hexChunks: string[],
+  extraInfo: Record<string, unknown>,
+): AudioResponse {
+  const combinedHex = hexChunks.join("");
+  const audioBytes = combinedHex
+    ? decodeHexAudio(combinedHex)
+    : Buffer.alloc(0);
+
+  return new AudioResponse({
+    data: audioBytes,
+    duration: Number(extraInfo.audio_length ?? 0),
+    sampleRate: Number(extraInfo.audio_sample_rate ?? 0),
+    format: String(extraInfo.audio_format ?? "mp3"),
+    size: Number(extraInfo.audio_size ?? 0) || audioBytes.length,
+  });
+}
+
+// ── SpeechConnection ──────────────────────────────────────────────────────
+
+/**
+ * WebSocket connection for real-time TTS.
+ *
+ * Manages the lifecycle of a single WebSocket session using the
+ * `task_start` / `task_continue` / `task_finish` protocol.
+ *
+ * The WebSocket has a 120-second idle timeout enforced by the server.
+ */
+export class SpeechConnection {
+  private _ws: import("ws").default;
+  private _config: Record<string, unknown>;
+  private _closed = false;
+  sessionId = "";
+
+  /** @internal */
+  constructor(ws: import("ws").default, config: Record<string, unknown>) {
+    this._ws = ws;
+    this._config = config;
+  }
+
+  /** @internal Send task_start and wait for task_started. */
+  async _start(): Promise<void> {
+    const startMsg = { event: "task_start", ...this._config };
+    this._ws.send(JSON.stringify(startMsg));
+
+    return new Promise<void>((resolve, reject) => {
+      const handler = (raw: import("ws").RawData) => {
+        try {
+          const msg = parseWSMessage(raw.toString());
+          const event = String(msg.event ?? "");
+          if (event === "task_started") {
+            this.sessionId = String(msg.session_id ?? "");
+            this._ws.off("message", handler);
+            resolve();
+          } else if (event === "task_failed") {
+            this._ws.off("message", handler);
+            const base = (msg.base_resp ?? {}) as Record<string, unknown>;
+            reject(
+              new MiniMaxError(
+                String(msg.message ?? "WebSocket task_start failed"),
+                Number(base.status_code ?? 0),
+                String(msg.trace_id ?? ""),
+              ),
+            );
+          }
+        } catch (err) {
+          this._ws.off("message", handler);
+          reject(err);
+        }
+      };
+      this._ws.on("message", handler);
+    });
+  }
+
+  /**
+   * Send text and receive a complete AudioResponse.
+   *
+   * Sends a `task_continue` event, collects all `task_continued` chunks,
+   * and returns a single AudioResponse when `is_final` is received.
+   */
+  async send(text: string): Promise<AudioResponse> {
+    if (this._closed) throw new Error("SpeechConnection is already closed.");
+
+    this._ws.send(JSON.stringify({ event: "task_continue", text }));
+
+    const hexChunks: string[] = [];
+    let extraInfo: Record<string, unknown> = {};
+
+    return new Promise<AudioResponse>((resolve, reject) => {
+      const handler = (raw: import("ws").RawData) => {
+        try {
+          const msg = parseWSMessage(raw.toString());
+          const event = String(msg.event ?? "");
+
+          if (event === "task_continued") {
+            const data = (msg.data ?? {}) as Record<string, unknown>;
+            const hex = data.audio as string | undefined;
+            if (hex) hexChunks.push(hex);
+            if (msg.extra_info)
+              extraInfo = msg.extra_info as Record<string, unknown>;
+            if (msg.is_final) {
+              this._ws.off("message", handler);
+              resolve(audioResponseFromWSChunks(hexChunks, extraInfo));
+            }
+          } else if (event === "task_failed") {
+            this._ws.off("message", handler);
+            const base = (msg.base_resp ?? {}) as Record<string, unknown>;
+            reject(
+              new MiniMaxError(
+                String(msg.message ?? "WebSocket task_continue failed"),
+                Number(base.status_code ?? 0),
+                String(msg.trace_id ?? ""),
+              ),
+            );
+          }
+        } catch (err) {
+          this._ws.off("message", handler);
+          reject(err);
+        }
+      };
+      this._ws.on("message", handler);
+    });
+  }
+
+  /**
+   * Send text and yield decoded audio bytes as they arrive.
+   */
+  async *sendStream(text: string): AsyncGenerator<Buffer> {
+    if (this._closed) throw new Error("SpeechConnection is already closed.");
+
+    this._ws.send(JSON.stringify({ event: "task_continue", text }));
+
+    const queue: Array<Buffer | null | Error> = [];
+    let resolve: (() => void) | null = null;
+
+    const handler = (raw: import("ws").RawData) => {
+      try {
+        const msg = parseWSMessage(raw.toString());
+        const event = String(msg.event ?? "");
+
+        if (event === "task_continued") {
+          const data = (msg.data ?? {}) as Record<string, unknown>;
+          const hex = data.audio as string | undefined;
+          if (hex) queue.push(decodeHexAudio(hex));
+          if (msg.is_final) {
+            this._ws.off("message", handler);
+            queue.push(null); // signal end
+          }
+        } else if (event === "task_failed") {
+          this._ws.off("message", handler);
+          const base = (msg.base_resp ?? {}) as Record<string, unknown>;
+          queue.push(
+            new MiniMaxError(
+              String(msg.message ?? "WebSocket task_continue failed"),
+              Number(base.status_code ?? 0),
+              String(msg.trace_id ?? ""),
+            ),
+          );
+        }
+      } catch (err) {
+        this._ws.off("message", handler);
+        queue.push(err instanceof Error ? err : new Error(String(err)));
+      }
+      if (resolve) {
+        resolve();
+        resolve = null;
+      }
+    };
+    this._ws.on("message", handler);
+
+    try {
+      while (true) {
+        if (queue.length === 0) {
+          await new Promise<void>((r) => {
+            resolve = r;
+          });
+        }
+        const item = queue.shift();
+        if (item === null || item === undefined) return;
+        if (item instanceof Error) throw item;
+        yield item;
+      }
+    } finally {
+      this._ws.off("message", handler);
+    }
+  }
+
+  /**
+   * Send `task_finish` and close the WebSocket connection.
+   * Safe to call multiple times.
+   */
+  async close(): Promise<void> {
+    if (this._closed) return;
+    this._closed = true;
+
+    try {
+      this._ws.send(JSON.stringify({ event: "task_finish" }));
+      await new Promise<void>((resolve) => {
+        const handler = (raw: import("ws").RawData) => {
+          try {
+            const msg = parseWSMessage(raw.toString());
+            const event = String(msg.event ?? "");
+            if (event === "task_finished" || event === "task_failed") {
+              this._ws.off("message", handler);
+              resolve();
+            }
+          } catch {
+            this._ws.off("message", handler);
+            resolve();
+          }
+        };
+        this._ws.on("message", handler);
+        // Timeout fallback
+        setTimeout(() => {
+          this._ws.off("message", handler);
+          resolve();
+        }, 5000);
+      });
+    } catch {
+      // Connection already gone
+    } finally {
+      try {
+        this._ws.close();
+      } catch {
+        // ignore
+      }
+    }
   }
 }
