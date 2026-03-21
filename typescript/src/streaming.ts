@@ -31,7 +31,9 @@ export async function* parseSSEStream(
       const line = value;
 
       if (line.startsWith("data: ")) {
-        dataBuf = line.slice(6);
+        const data = line.slice(6);
+        if (data === "[DONE]") return;
+        dataBuf = data;
       } else if (line === "") {
         if (dataBuf) {
           const payload = JSON.parse(dataBuf) as Record<string, unknown>;
