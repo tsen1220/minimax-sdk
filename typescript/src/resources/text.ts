@@ -207,7 +207,7 @@ function parseStreamEvent(raw: Record<string, unknown>): StreamEvent {
     case "message_start":
       return {
         type: raw.type,
-        message: parseMessage(raw.message),
+        message: parseMessage(raw.message as Record<string, unknown>),
       } as MessageStartEvent;
 
     case "content_block_start":
@@ -221,19 +221,19 @@ function parseStreamEvent(raw: Record<string, unknown>): StreamEvent {
       return {
         type: raw.type,
         index: raw.index,
-        delta: parseDelta(raw.delta),
+        delta: parseDelta(raw.delta as Record<string, unknown>),
       } as ContentBlockDeltaEvent;
 
     case "message_delta":
       return {
         type: raw.type,
-        delta: parseMessageDelta(raw.delta),
-        usage: parseUsage(raw.usage),
-      } as MessageDeltaEvent;
+        delta: parseMessageDelta(raw.delta as Record<string, unknown>),
+        usage: parseUsage(raw.usage as Record<string, unknown>),
+      } as unknown as MessageDeltaEvent;
 
     default:
       // content_block_stop, message_stop pass through as-is
-      return raw as StreamEvent;
+      return raw as unknown as StreamEvent;
   }
 }
 

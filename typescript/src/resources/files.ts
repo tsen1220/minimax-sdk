@@ -140,8 +140,12 @@ export class Files extends APIResource {
    * @param purpose - The purpose tag of the file.
    */
   async delete(fileId: string, purpose: string): Promise<void> {
+    if (!fileId.trim() || !/^\d+$/.test(fileId)) {
+      throw new Error(`file_id must be a numeric string, got: "${fileId}"`);
+    }
+    const numericId = Number(fileId);
     await this._client.request("POST", "/v1/files/delete", {
-      json: { file_id: Number(fileId), purpose },
+      json: { file_id: numericId, purpose },
     });
   }
 }

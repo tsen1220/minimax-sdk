@@ -37,9 +37,9 @@ describe("Voice", () => {
   describe("uploadAudio()", () => {
     it("delegates to client.files.upload with default purpose", async () => {
       const fileInfo = {
-        file_id: "f_001",
+        fileId: "f_001",
         bytes: 1000,
-        created_at: 1700000000,
+        createdAt: 1700000000,
         filename: "audio.wav",
         purpose: "voice_clone",
       };
@@ -56,7 +56,7 @@ describe("Voice", () => {
     });
 
     it("allows custom purpose", async () => {
-      mockClient.files.upload.mockResolvedValue({ file_id: "f_002" });
+      mockClient.files.upload.mockResolvedValue({ fileId: "f_002" });
 
       await voice.uploadAudio(Buffer.from("data"), "prompt_audio");
 

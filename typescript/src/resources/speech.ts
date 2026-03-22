@@ -308,7 +308,12 @@ export class Speech extends APIResource {
     });
 
     const conn = new SpeechConnection(ws, config);
-    await conn._start();
+    try {
+      await conn._start();
+    } catch (err) {
+      try { ws.close(); } catch { /* ignore */ }
+      throw err;
+    }
     return conn;
   }
 

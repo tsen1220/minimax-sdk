@@ -204,7 +204,7 @@ describe("Files", () => {
       expect(result.downloadUrl).toBe("https://cdn.minimax.io/files/12345");
     });
 
-    it("converts file_id through Number and back to string", async () => {
+    it("passes file_id as a string in params", async () => {
       mockClient.request.mockResolvedValue({
         file: { file_id: "99999" },
       });
@@ -212,7 +212,6 @@ describe("Files", () => {
       await files.retrieve("99999");
 
       const params = mockClient.request.mock.calls[0]![2].params;
-      // String(Number("99999")) = "99999"
       expect(params.file_id).toBe("99999");
     });
   });
@@ -238,7 +237,7 @@ describe("Files", () => {
       expect(result).toBe(arrayBuffer);
     });
 
-    it("converts file_id through Number", async () => {
+    it("passes file_id as a string in params", async () => {
       mockClient.requestBytes.mockResolvedValue(new ArrayBuffer(0));
 
       await files.retrieveContent("67890");

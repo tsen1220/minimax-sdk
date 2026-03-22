@@ -7,7 +7,7 @@
  * Run with: cd typescript && npx vitest run tests/integration/files.test.ts
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, type TaskContext } from "vitest";
 import { writeFileSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -52,8 +52,8 @@ describe("Files", () => {
     }
   });
 
-  it("2. list files contains uploaded file", async () => {
-    if (!uploadedFileId) return;
+  it("2. list files contains uploaded file", async (ctx) => {
+    if (!uploadedFileId) { ctx.skip(); return; }
 
     const files = await client.files.list("voice_clone");
 
@@ -65,8 +65,8 @@ describe("Files", () => {
     expect(ids).toContain(uploadedFileId);
   });
 
-  it("3. retrieve file info", async () => {
-    if (!uploadedFileId) return;
+  it("3. retrieve file info", async (ctx) => {
+    if (!uploadedFileId) { ctx.skip(); return; }
 
     const info = await client.files.retrieve(uploadedFileId);
 
@@ -79,8 +79,8 @@ describe("Files", () => {
     expect(info.bytes).toBeGreaterThan(0);
   });
 
-  it("4. retrieve file content matches upload", async () => {
-    if (!uploadedFileId) return;
+  it("4. retrieve file content matches upload", async (ctx) => {
+    if (!uploadedFileId) { ctx.skip(); return; }
 
     const content = await client.files.retrieveContent(uploadedFileId);
     const downloaded = Buffer.from(content);
@@ -94,8 +94,8 @@ describe("Files", () => {
     expect(downloaded.equals(expected)).toBe(true);
   });
 
-  it("5. delete file", async () => {
-    if (!uploadedFileId) return;
+  it("5. delete file", async (ctx) => {
+    if (!uploadedFileId) { ctx.skip(); return; }
 
     await client.files.delete(uploadedFileId, "voice_clone");
     console.log(`\n  deleted file_id=${uploadedFileId}`);

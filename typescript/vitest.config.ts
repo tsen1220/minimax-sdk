@@ -24,6 +24,7 @@ export default defineConfig({
   test: {
     globals: true,
     include: ["tests/**/*.test.ts"],
+    exclude: ["tests/integration/**"],
     testTimeout: 600_000,
     env: loadParentEnv(),
   },
