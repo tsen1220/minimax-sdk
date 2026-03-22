@@ -1,17 +1,32 @@
+# Secrets
 .env
-.firecrawl/
+.env.*
+
+# Python
 __pycache__/
 *.pyc
 *.pyo
 .ruff_cache/
 .pytest_cache/
-dist/
-build/
 *.egg-info/
 .venv/
 uv.lock
 .coverage
-.claude/
+
+# TypeScript
+node_modules/
+*.tsbuildinfo
+coverage/
+
+# Build output
+dist/
+build/
+
+# IDE / OS
 .DS_Store
+.claude/
+.firecrawl/
+
+# Project-specific
 python/tests/integration/outputs/
 docs/specs/
