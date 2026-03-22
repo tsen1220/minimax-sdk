@@ -281,5 +281,29 @@ describe("Files", () => {
       const result = await files.delete("100", "voice_clone");
       expect(result).toBeUndefined();
     });
+
+    it("rejects empty string fileId", async () => {
+      await expect(files.delete("", "voice_clone")).rejects.toThrow(
+        'file_id must be a numeric string, got: ""',
+      );
+    });
+
+    it("rejects whitespace-only fileId", async () => {
+      await expect(files.delete("  ", "voice_clone")).rejects.toThrow(
+        "file_id must be a numeric string",
+      );
+    });
+
+    it("rejects non-numeric fileId", async () => {
+      await expect(files.delete("abc", "voice_clone")).rejects.toThrow(
+        "file_id must be a numeric string",
+      );
+    });
+
+    it("rejects mixed alphanumeric fileId", async () => {
+      await expect(files.delete("123abc", "voice_clone")).rejects.toThrow(
+        "file_id must be a numeric string",
+      );
+    });
   });
 });

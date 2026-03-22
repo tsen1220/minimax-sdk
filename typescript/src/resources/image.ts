@@ -76,7 +76,7 @@ function parseImageResult(resp: Record<string, unknown>): ImageResult {
   const metadata = (resp.metadata ?? {}) as Record<string, unknown>;
 
   return {
-    id: String(resp.id),
+    id: String(resp.id ?? ""),
     imageUrls: (data.image_urls as string[] | undefined) ?? undefined,
     imageBase64: (data.image_base64 as string[] | undefined) ?? undefined,
     successCount: Number(metadata.success_count ?? 0),
