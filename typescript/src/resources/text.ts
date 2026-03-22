@@ -165,44 +165,44 @@ function buildMessagesBody(
 
 // ── Response parsing helpers ────────────────────────────────────────────────
 
-function parseUsage(raw: any): Usage {
+function parseUsage(raw: Record<string, unknown>): Usage {
   return {
-    inputTokens: raw.input_tokens,
-    outputTokens: raw.output_tokens,
+    inputTokens: raw.input_tokens as number,
+    outputTokens: raw.output_tokens as number,
   };
 }
 
-function parseMessage(raw: any): Message {
+function parseMessage(raw: Record<string, unknown>): Message {
   return {
-    id: raw.id,
-    type: raw.type,
-    role: raw.role,
-    content: raw.content,
-    model: raw.model,
-    stopReason: raw.stop_reason,
-    stopSequence: raw.stop_sequence,
-    usage: parseUsage(raw.usage),
+    id: raw.id as string,
+    type: raw.type as "message",
+    role: raw.role as "assistant",
+    content: raw.content as ContentBlock[],
+    model: raw.model as string,
+    stopReason: (raw.stop_reason as string) ?? null,
+    stopSequence: (raw.stop_sequence as string) ?? null,
+    usage: parseUsage(raw.usage as Record<string, unknown>),
   };
 }
 
-function parseDelta(raw: any): Delta {
+function parseDelta(raw: Record<string, unknown>): Delta {
   if (raw.type === "input_json_delta") {
     return {
       type: raw.type,
-      partialJson: raw.partial_json,
+      partialJson: raw.partial_json as string,
     } as InputJsonDelta;
   }
-  return raw as Delta;
+  return raw as unknown as Delta;
 }
 
-function parseMessageDelta(raw: any): MessageDelta {
+function parseMessageDelta(raw: Record<string, unknown>): MessageDelta {
   return {
-    stopReason: raw.stop_reason,
-    stopSequence: raw.stop_sequence,
+    stopReason: (raw.stop_reason as string) ?? null,
+    stopSequence: (raw.stop_sequence as string) ?? null,
   };
 }
 
-function parseStreamEvent(raw: any): StreamEvent {
+function parseStreamEvent(raw: Record<string, unknown>): StreamEvent {
   switch (raw.type) {
     case "message_start":
       return {
